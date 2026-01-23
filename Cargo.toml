@@ -35,6 +35,11 @@ anyhow = "1.0"
 thiserror = "1.0"
 regex = { version = "1.10", optional = true }
 
+[[bin]]
+name = "Bitmesh-backend"
+path = "src/main.rs"
+required-features = ["tokio", "tracing", "tracing-subscriber", "serde", "serde_json", "chrono"]
+
 [dev-dependencies]
 soroban-sdk = { version = "21.0.0", features = ["testutils"] }
 tokio = { version = "1.36", features = ["full"] }
