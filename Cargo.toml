@@ -22,6 +22,14 @@ serde_json = { version = "1.0", optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
 
+# Stellar SDK dependencies (always required)
+stellar_sdk = "0.1.4"
+reqwest = { version = "0.11", features = ["json"] }
+config = "0.14"
+base64 = "0.21"
+anyhow = "1.0"
+thiserror = "1.0"
+
 [dev-dependencies]
 soroban-sdk = { version = "21.0.0", features = ["testutils"] }
 tokio = { version = "1.36", features = ["full"] }
