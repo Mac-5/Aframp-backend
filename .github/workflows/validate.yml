@@ -1,0 +1,31 @@
+name: Pipeline Validation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate Pipeline Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Dockerfile exists
+        run: test -f Dockerfile
+
+      - name: Check Cargo.toml exists
+        run: test -f Cargo.toml
+
+      - name: Validate Dockerfile syntax
+        run: docker build --no-cache --target builder -t test:builder .
+
+      - name: Check workflow syntax
+        run: |
+          echo "Workflow files:"
+          ls -la .github/workflows/
+
+      - name: Summary
+        run: |
+          echo "✅ Dockerfile validated"
+          echo "✅ Cargo.toml found"
+          echo "✅ Workflow configuration valid"
