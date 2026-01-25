@@ -72,7 +72,7 @@ impl Environment {
 #[cfg(feature = "database")]
 pub fn init_tracing() {
     let environment = Environment::from_env();
-    
+
     // Determine log format (JSON for production, pretty for dev)
     let use_json = env::var("LOG_FORMAT")
         .map(|f| f.to_lowercase() == "json")
@@ -105,9 +105,7 @@ pub fn init_tracing() {
             .with_line_number(false)
             .with_filter(env_filter);
 
-        tracing_subscriber::registry()
-            .with(json_layer)
-            .init();
+        tracing_subscriber::registry().with(json_layer).init();
     } else {
         // Pretty formatting for development (human-readable)
         let pretty_layer = fmt::layer()
@@ -121,9 +119,7 @@ pub fn init_tracing() {
             .with_span_events(FmtSpan::CLOSE)
             .with_filter(env_filter);
 
-        tracing_subscriber::registry()
-            .with(pretty_layer)
-            .init();
+        tracing_subscriber::registry().with(pretty_layer).init();
     }
 
     tracing::info!(
@@ -187,7 +183,9 @@ pub fn redact_sensitive_data(text: &str) -> String {
 
         for pattern in &patterns {
             if let Ok(re) = regex::Regex::new(pattern) {
-                result = re.replace_all(&result, format!(r#""{}": "[REDACTED]""#, key)).to_string();
+                result = re
+                    .replace_all(&result, format!(r#""{}": "[REDACTED]""#, key))
+                    .to_string();
             }
         }
     }

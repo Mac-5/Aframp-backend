@@ -1,27 +1,36 @@
 use crate::chains::stellar::{
     config::StellarConfig,
     errors::{StellarError, StellarResult},
-    types::{extract_afri_balance, HealthStatus, StellarAccountInfo, HorizonAccount, is_valid_stellar_address},
+    types::{
+        extract_afri_balance, is_valid_stellar_address, HealthStatus, HorizonAccount,
+        StellarAccountInfo,
+    },
 };
 use reqwest::Client;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
+#[allow(dead_code)]
 pub struct StellarClient {
     http_client: Client,
     config: StellarConfig,
 }
 
+#[allow(dead_code)]
 impl StellarClient {
     pub fn new(config: StellarConfig) -> StellarResult<Self> {
-        config.validate().map_err(|e| StellarError::config_error(e.to_string()))?;
+        config
+            .validate()
+            .map_err(|e| StellarError::config_error(e.to_string()))?;
 
         let http_client = Client::builder()
             .timeout(config.request_timeout)
             .user_agent("Aframp-Backend/1.0")
             .build()
-            .map_err(|e| StellarError::config_error(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| {
+                StellarError::config_error(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         info!(
             "Stellar client initialized for {:?} network with URL: {}",
@@ -43,7 +52,7 @@ impl StellarClient {
         debug!("Fetching account details for address: {}", address);
 
         let url = format!("{}/accounts/{}", self.config.network.horizon_url(), address);
-        
+
         let response = timeout(
             self.config.request_timeout,
             self.http_client.get(&url).send(),
@@ -71,12 +80,13 @@ impl StellarClient {
             }
         })?;
 
-        let account_result: HorizonAccount = response.json().await.map_err(|e| {
-            StellarError::network_error(format!("JSON parsing error: {}", e))
-        })?;
+        let account_result: HorizonAccount = response
+            .json()
+            .await
+            .map_err(|e| StellarError::network_error(format!("JSON parsing error: {}", e)))?;
 
         let account_info = StellarAccountInfo::from(account_result);
-        
+
         debug!("Successfully fetched account for address: {}", address);
         Ok(account_info)
     }
@@ -106,38 +116,41 @@ impl StellarClient {
 
     pub async fn get_balances(&self, address: &str) -> StellarResult<Vec<String>> {
         let account = self.get_account(address).await?;
-        let balances: Vec<String> = account.balances
+        let balances: Vec<String> = account
+            .balances
             .iter()
-            .map(|balance| {
-                match balance.asset_type.as_str() {
-                    "native" => format!("XLM: {}", balance.balance),
-                    "credit_alphanum4" | "credit_alphanum12" => {
-                        format!(
-                            "{}:{}:{}",
-                            balance.asset_code.as_deref().unwrap_or("UNKNOWN"),
-                            balance.asset_issuer.as_deref().unwrap_or("UNKNOWN"),
-                            balance.balance
-                        )
-                    }
-                    _ => format!("{}:{}", balance.asset_type, balance.balance),
+            .map(|balance| match balance.asset_type.as_str() {
+                "native" => format!("XLM: {}", balance.balance),
+                "credit_alphanum4" | "credit_alphanum12" => {
+                    format!(
+                        "{}:{}:{}",
+                        balance.asset_code.as_deref().unwrap_or("UNKNOWN"),
+                        balance.asset_issuer.as_deref().unwrap_or("UNKNOWN"),
+                        balance.balance
+                    )
                 }
+                _ => format!("{}:{}", balance.asset_type, balance.balance),
             })
             .collect();
 
-        debug!("Retrieved {} balances for address: {}", balances.len(), address);
+        debug!(
+            "Retrieved {} balances for address: {}",
+            balances.len(),
+            address
+        );
         Ok(balances)
     }
 
     pub async fn get_afri_balance(&self, address: &str) -> StellarResult<Option<String>> {
         let account = self.get_account(address).await?;
         let afri_balance = extract_afri_balance(&account.balances);
-        
+
         debug!(
             "AFRI balance for address {}: {}",
             address,
             afri_balance.as_deref().unwrap_or("None")
         );
-        
+
         Ok(afri_balance)
     }
 
@@ -145,10 +158,16 @@ impl StellarClient {
         let start_time = Instant::now();
         let horizon_url = self.config.network.horizon_url();
 
-        debug!("Performing health check for Stellar Horizon at: {}", horizon_url);
+        debug!(
+            "Performing health check for Stellar Horizon at: {}",
+            horizon_url
+        );
+
+        // Use config timeout for health check (default 10s, but allow longer for slow networks)
+        let health_timeout = std::cmp::max(self.config.request_timeout, Duration::from_secs(15));
 
         let result = timeout(
-            Duration::from_secs(5),
+            health_timeout,
             self.http_client.get(format!("{}/", horizon_url)).send(),
         )
         .await;
@@ -195,7 +214,10 @@ impl StellarClient {
                 })
             }
             Err(_) => {
-                let error_msg = format!("Request timed out after 5 seconds");
+                let error_msg = format!(
+                    "Request timed out after {} seconds",
+                    health_timeout.as_secs()
+                );
                 error!("Stellar Horizon health check failed: {}", error_msg);
 
                 Ok(HealthStatus {

@@ -10,7 +10,7 @@ pub struct Wallet {
     pub id: String,
     pub user_id: String,
     pub account_address: String,
-    pub balance: String,           // Store as string to preserve precision
+    pub balance: String, // Store as string to preserve precision
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -34,11 +34,14 @@ impl WalletRepository {
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Find wallet by account address
-    pub async fn find_by_account(&self, account_address: &str) -> Result<Option<Wallet>, DatabaseError> {
+    pub async fn find_by_account(
+        &self,
+        account_address: &str,
+    ) -> Result<Option<Wallet>, DatabaseError> {
         sqlx::query_as::<_, Wallet>(
             "SELECT id, user_id, account_address, balance, created_at, updated_at 
              FROM wallets WHERE account_address = $1",
@@ -46,7 +49,7 @@ impl WalletRepository {
         .bind(account_address)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Update wallet balance
@@ -123,14 +126,16 @@ impl WalletRepository {
         match wallet {
             Some(w) => {
                 // Parse as decimal for comparison
-                let balance: f64 = w.balance.parse()
-                    .map_err(|_| DatabaseError::new(DatabaseErrorKind::QueryError {
+                let balance: f64 = w.balance.parse().map_err(|_| {
+                    DatabaseError::new(DatabaseErrorKind::QueryError {
                         message: "Invalid balance format".to_string(),
-                    }))?;
-                let required: f64 = required_amount.parse()
-                    .map_err(|_| DatabaseError::new(DatabaseErrorKind::QueryError {
+                    })
+                })?;
+                let required: f64 = required_amount.parse().map_err(|_| {
+                    DatabaseError::new(DatabaseErrorKind::QueryError {
                         message: "Invalid amount format".to_string(),
-                    }))?;
+                    })
+                })?;
 
                 Ok(balance >= required)
             }
@@ -154,7 +159,7 @@ impl Repository for WalletRepository {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn find_all(&self) -> Result<Vec<Self::Entity>, DatabaseError> {
@@ -164,7 +169,7 @@ impl Repository for WalletRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn insert(&self, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -181,7 +186,7 @@ impl Repository for WalletRepository {
         .bind(entity.updated_at)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn update(&self, id: &str, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -196,7 +201,7 @@ impl Repository for WalletRepository {
         .bind(id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn delete(&self, id: &str) -> Result<bool, DatabaseError> {
@@ -204,7 +209,7 @@ impl Repository for WalletRepository {
             .bind(id)
             .execute(&self.pool)
             .await
-            .map_err(|e| DatabaseError::from_sqlx(e))?;
+            .map_err(DatabaseError::from_sqlx)?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -220,8 +225,6 @@ use crate::database::error::DatabaseErrorKind;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // These tests require a running database
     // Run with: SQLX_OFFLINE=true cargo test
 }

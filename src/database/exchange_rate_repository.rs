@@ -42,7 +42,7 @@ impl ExchangeRateRepository {
         .bind(to_currency)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Get historical rates between two currencies
@@ -63,7 +63,7 @@ impl ExchangeRateRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Create or update exchange rate
@@ -90,11 +90,14 @@ impl ExchangeRateRepository {
         .bind(source)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Get rates expiring soon (older than specified duration)
-    pub async fn get_stale_rates(&self, hours_old: i32) -> Result<Vec<ExchangeRate>, DatabaseError> {
+    pub async fn get_stale_rates(
+        &self,
+        hours_old: i32,
+    ) -> Result<Vec<ExchangeRate>, DatabaseError> {
         sqlx::query_as::<_, ExchangeRate>(
             "SELECT id, from_currency, to_currency, rate, source, created_at, updated_at 
              FROM exchange_rates 
@@ -104,7 +107,7 @@ impl ExchangeRateRepository {
         .bind(hours_old)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 }
 
@@ -120,7 +123,7 @@ impl Repository for ExchangeRateRepository {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn find_all(&self) -> Result<Vec<Self::Entity>, DatabaseError> {
@@ -130,7 +133,7 @@ impl Repository for ExchangeRateRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn insert(&self, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -148,7 +151,7 @@ impl Repository for ExchangeRateRepository {
         .bind(entity.updated_at)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn update(&self, id: &str, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -165,7 +168,7 @@ impl Repository for ExchangeRateRepository {
         .bind(id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn delete(&self, id: &str) -> Result<bool, DatabaseError> {
@@ -173,7 +176,7 @@ impl Repository for ExchangeRateRepository {
             .bind(id)
             .execute(&self.pool)
             .await
-            .map_err(|e| DatabaseError::from_sqlx(e))?;
+            .map_err(DatabaseError::from_sqlx)?;
 
         Ok(result.rows_affected() > 0)
     }

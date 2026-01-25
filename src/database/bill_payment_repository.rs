@@ -29,7 +29,10 @@ impl BillPaymentRepository {
     }
 
     /// Find bill details by the core transaction ID
-    pub async fn find_by_transaction_id(&self, transaction_id: Uuid) -> Result<Option<BillPayment>, DatabaseError> {
+    pub async fn find_by_transaction_id(
+        &self,
+        transaction_id: Uuid,
+    ) -> Result<Option<BillPayment>, DatabaseError> {
         sqlx::query_as::<_, BillPayment>(
             "SELECT id, transaction_id, provider_name, account_number, bill_type, due_date, paid_with_afri, created_at, updated_at 
              FROM bill_payments WHERE transaction_id = $1"
@@ -37,7 +40,7 @@ impl BillPaymentRepository {
         .bind(transaction_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Create new bill payment details for a transaction
@@ -63,7 +66,7 @@ impl BillPaymentRepository {
         .bind(paid_with_afri)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 }
 
@@ -72,7 +75,11 @@ impl Repository for BillPaymentRepository {
     type Entity = BillPayment;
 
     async fn find_by_id(&self, id: &str) -> Result<Option<Self::Entity>, DatabaseError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| DatabaseError::new(DatabaseErrorKind::Unknown { message: format!("Invalid UUID: {}", e) }))?;
+        let uuid = Uuid::parse_str(id).map_err(|e| {
+            DatabaseError::new(DatabaseErrorKind::Unknown {
+                message: format!("Invalid UUID: {}", e),
+            })
+        })?;
         sqlx::query_as::<_, BillPayment>(
             "SELECT id, transaction_id, provider_name, account_number, bill_type, due_date, paid_with_afri, created_at, updated_at 
              FROM bill_payments WHERE id = $1"
@@ -80,7 +87,7 @@ impl Repository for BillPaymentRepository {
         .bind(uuid)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn find_all(&self) -> Result<Vec<Self::Entity>, DatabaseError> {
@@ -90,7 +97,7 @@ impl Repository for BillPaymentRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn insert(&self, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -107,11 +114,15 @@ impl Repository for BillPaymentRepository {
         .bind(entity.paid_with_afri)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn update(&self, id: &str, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| DatabaseError::new(DatabaseErrorKind::Unknown { message: format!("Invalid UUID: {}", e) }))?;
+        let uuid = Uuid::parse_str(id).map_err(|e| {
+            DatabaseError::new(DatabaseErrorKind::Unknown {
+                message: format!("Invalid UUID: {}", e),
+            })
+        })?;
         sqlx::query_as::<_, BillPayment>(
             "UPDATE bill_payments 
              SET transaction_id = $1, provider_name = $2, account_number = $3, bill_type = $4, due_date = $5, paid_with_afri = $6 
@@ -127,16 +138,20 @@ impl Repository for BillPaymentRepository {
         .bind(uuid)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn delete(&self, id: &str) -> Result<bool, DatabaseError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| DatabaseError::new(DatabaseErrorKind::Unknown { message: format!("Invalid UUID: {}", e) }))?;
+        let uuid = Uuid::parse_str(id).map_err(|e| {
+            DatabaseError::new(DatabaseErrorKind::Unknown {
+                message: format!("Invalid UUID: {}", e),
+            })
+        })?;
         let result = sqlx::query("DELETE FROM bill_payments WHERE id = $1")
             .bind(uuid)
             .execute(&self.pool)
             .await
-            .map_err(|e| DatabaseError::from_sqlx(e))?;
+            .map_err(DatabaseError::from_sqlx)?;
         Ok(result.rows_affected() > 0)
     }
 }

@@ -2,6 +2,7 @@ use thiserror::Error;
 
 pub type StellarResult<T> = Result<T, StellarError>;
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum StellarError {
     #[error("Account not found: {address}")]
@@ -32,6 +33,7 @@ pub enum StellarError {
     UnexpectedError { message: String },
 }
 
+#[allow(dead_code)]
 impl StellarError {
     pub fn account_not_found(address: impl Into<String>) -> Self {
         Self::AccountNotFound {

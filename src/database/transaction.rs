@@ -1,9 +1,9 @@
 use crate::database::error::{DatabaseError, DatabaseErrorKind};
 use sqlx::Transaction as SqlxTransaction;
 use sqlx::{PgPool, Postgres};
-use tracing::{debug, warn, error as log_error};
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
+use tracing::{debug, error as log_error, warn};
 
 /// Database transaction wrapper for atomic operations
 /// Ensures automatic rollback on errors and proper connection management
@@ -15,14 +15,11 @@ impl DatabaseTransaction {
     /// Begin a new transaction
     pub async fn begin(pool: &PgPool) -> Result<Self, DatabaseError> {
         debug!("Beginning database transaction");
-        
-        let transaction = pool
-            .begin()
-            .await
-            .map_err(|e| {
-                log_error!("Failed to begin transaction: {}", e);
-                DatabaseError::from_sqlx(e)
-            })?;
+
+        let transaction = pool.begin().await.map_err(|e| {
+            log_error!("Failed to begin transaction: {}", e);
+            DatabaseError::from_sqlx(e)
+        })?;
 
         Ok(Self {
             transaction: Some(transaction),
@@ -33,13 +30,11 @@ impl DatabaseTransaction {
     pub async fn commit(mut self) -> Result<(), DatabaseError> {
         if let Some(tx) = self.transaction.take() {
             debug!("Committing transaction");
-            
-            tx.commit()
-                .await
-                .map_err(|e| {
-                    log_error!("Failed to commit transaction: {}", e);
-                    DatabaseError::from_sqlx(e)
-                })?;
+
+            tx.commit().await.map_err(|e| {
+                log_error!("Failed to commit transaction: {}", e);
+                DatabaseError::from_sqlx(e)
+            })?;
 
             Ok(())
         } else {
@@ -53,13 +48,11 @@ impl DatabaseTransaction {
     pub async fn rollback(mut self) -> Result<(), DatabaseError> {
         if let Some(tx) = self.transaction.take() {
             debug!("Rolling back transaction");
-            
-            tx.rollback()
-                .await
-                .map_err(|e| {
-                    log_error!("Failed to rollback transaction: {}", e);
-                    DatabaseError::from_sqlx(e)
-                })?;
+
+            tx.rollback().await.map_err(|e| {
+                log_error!("Failed to rollback transaction: {}", e);
+                DatabaseError::from_sqlx(e)
+            })?;
 
             Ok(())
         } else {
@@ -113,6 +106,7 @@ impl TransactionBuilder {
 }
 
 #[cfg(test)]
+#[warn(unused)]
 mod tests {
     use super::*;
 

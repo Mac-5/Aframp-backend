@@ -36,8 +36,11 @@ pub struct AssetBalance {
     pub asset_code: Option<String>,
     pub asset_issuer: Option<String>,
     pub balance: String,
-    pub limit: String,
+    #[serde(default)]
+    pub limit: Option<String>,
+    #[serde(default)]
     pub is_authorized: bool,
+    #[serde(default)]
     pub is_authorized_to_maintain_liabilities: bool,
     pub last_modified_ledger: Option<u32>,
 }
@@ -71,8 +74,11 @@ pub struct HorizonBalance {
     pub asset_code: Option<String>,
     pub asset_issuer: Option<String>,
     pub balance: String,
-    pub limit: String,
+    #[serde(default)]
+    pub limit: Option<String>,
+    #[serde(default)]
     pub is_authorized: bool,
+    #[serde(default)]
     pub is_authorized_to_maintain_liabilities: bool,
     pub last_modified_ledger: Option<u64>,
 }
@@ -102,7 +108,9 @@ impl From<HorizonAccount> for StellarAccountInfo {
             signers: account.signers,
             data: account.data,
             last_modified_ledger: account.last_modified_ledger as u32,
-            created_at: account.created_at.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            created_at: account
+                .created_at
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
         }
     }
 }
@@ -124,15 +132,21 @@ impl From<HorizonBalance> for AssetBalance {
 
 pub fn is_valid_stellar_address(address: &str) -> bool {
     // Basic validation: Stellar addresses are 56 characters starting with 'G'
-    address.len() == 56 && address.starts_with('G') && address.chars().all(|c| c.is_ascii_alphanumeric())
+    address.len() == 56
+        && address.starts_with('G')
+        && address.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
+#[allow(dead_code)]
 pub fn extract_afri_balance(balances: &[AssetBalance]) -> Option<String> {
     balances
         .iter()
         .find(|balance| {
             balance.asset_type == "credit_alphanum4"
-                && balance.asset_code.as_ref().map_or(false, |code| code == "AFRI")
+                && balance
+                    .asset_code
+                    .as_ref()
+                    .is_some_and(|code| code == "AFRI")
         })
         .map(|balance| balance.balance.clone())
 }

@@ -58,7 +58,7 @@ impl TransactionRepository {
         .bind(offset)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Find transactions by status
@@ -77,7 +77,7 @@ impl TransactionRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Update transaction status
@@ -96,7 +96,7 @@ impl TransactionRepository {
         .bind(transaction_id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Create a new transaction
@@ -128,18 +128,17 @@ impl TransactionRepository {
         .bind(metadata)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Get transaction count for a wallet
     pub async fn count_by_wallet(&self, wallet_id: &str) -> Result<i64, DatabaseError> {
-        let result = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM transactions WHERE wallet_id = $1",
-        )
-        .bind(wallet_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| DatabaseError::from_sqlx(e))?;
+        let result =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM transactions WHERE wallet_id = $1")
+                .bind(wallet_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(DatabaseError::from_sqlx)?;
 
         Ok(result)
     }
@@ -158,7 +157,7 @@ impl Repository for TransactionRepository {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn find_all(&self) -> Result<Vec<Self::Entity>, DatabaseError> {
@@ -169,7 +168,7 @@ impl Repository for TransactionRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn insert(&self, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -192,7 +191,7 @@ impl Repository for TransactionRepository {
         .bind(entity.updated_at)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn update(&self, id: &str, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -214,7 +213,7 @@ impl Repository for TransactionRepository {
         .bind(id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn delete(&self, id: &str) -> Result<bool, DatabaseError> {
@@ -222,7 +221,7 @@ impl Repository for TransactionRepository {
             .bind(id)
             .execute(&self.pool)
             .await
-            .map_err(|e| DatabaseError::from_sqlx(e))?;
+            .map_err(DatabaseError::from_sqlx)?;
 
         Ok(result.rows_affected() > 0)
     }

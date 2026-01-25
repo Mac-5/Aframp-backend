@@ -5,7 +5,7 @@
 
 #[cfg(feature = "database")]
 use axum::{
-    extract::{Request, MatchedPath},
+    extract::{MatchedPath, Request},
     http::StatusCode,
     middleware::Next,
     response::Response,
@@ -13,11 +13,11 @@ use axum::{
 #[cfg(feature = "database")]
 use std::time::Instant;
 #[cfg(feature = "database")]
-use tower_http::request_id::{RequestId, MakeRequestId};
-#[cfg(feature = "database")]
-use uuid::Uuid;
+use tower_http::request_id::{MakeRequestId, RequestId};
 #[cfg(feature = "database")]
 use tracing::{info, warn, Instrument};
+#[cfg(feature = "database")]
+use uuid::Uuid;
 
 /// Generate unique request IDs using UUIDv4
 #[cfg(feature = "database")]
@@ -66,7 +66,7 @@ pub async fn request_logging_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let start = Instant::now();
-    
+
     // Extract request details
     let method = request.method().clone();
     let uri = request.uri().clone();
@@ -75,7 +75,7 @@ pub async fn request_logging_middleware(
         .get::<MatchedPath>()
         .map(|p| p.as_str().to_string())
         .unwrap_or_else(|| uri.path().to_string());
-    
+
     // Get request ID from headers or extensions
     let request_id = request
         .headers()
@@ -106,12 +106,10 @@ pub async fn request_logging_middleware(
             method = %method,
             path = %path,
         );
-        
-        async move {
-            next.run(request).await
-        }
-        .instrument(span)
-        .await
+
+        async move { next.run(request).await }
+            .instrument(span)
+            .await
     };
 
     let duration = start.elapsed();
@@ -208,15 +206,12 @@ pub fn extract_client_ip(request: &Request) -> Option<String> {
 /// # }
 /// ```
 #[cfg(feature = "database")]
-pub async fn log_database_query<F, T, E>(
-    query: &str,
-    operation: F,
-) -> Result<T, E>
+pub async fn log_database_query<F, T, E>(query: &str, operation: F) -> Result<T, E>
 where
     F: std::future::Future<Output = Result<T, E>>,
 {
     let start = Instant::now();
-    
+
     tracing::debug!(
         event_type = "database_query_start",
         query = %query,
@@ -277,16 +272,12 @@ where
 /// # }
 /// ```
 #[cfg(feature = "database")]
-pub async fn log_external_call<F, T, E>(
-    service: &str,
-    endpoint: &str,
-    operation: F,
-) -> Result<T, E>
+pub async fn log_external_call<F, T, E>(service: &str, endpoint: &str, operation: F) -> Result<T, E>
 where
     F: std::future::Future<Output = Result<T, E>>,
 {
     let start = Instant::now();
-    
+
     info!(
         event_type = "external_call_start",
         service = %service,
@@ -325,11 +316,7 @@ where
 #[cfg(all(test, feature = "database"))]
 mod tests {
     use super::*;
-    use axum::{
-        routing::get,
-        Router,
-        body::Body,
-    };
+    use axum::{body::Body, routing::get, Router};
     use http::Request;
 
     #[tokio::test]
@@ -361,9 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_database_query() {
-        let result = log_database_query("SELECT * FROM test", async {
-            Ok::<_, String>(42)
-        }).await;
+        let result = log_database_query("SELECT * FROM test", async { Ok::<_, String>(42) }).await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
@@ -373,7 +358,8 @@ mod tests {
     async fn test_log_external_call() {
         let result = log_external_call("TestService", "/endpoint", async {
             Ok::<_, String>("success")
-        }).await;
+        })
+        .await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "success");

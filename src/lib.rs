@@ -1,10 +1,10 @@
+#![allow(non_snake_case)]
 #![cfg_attr(not(feature = "database"), no_std)]
 
 // Import soroban SDK items only when not using database feature
 #[cfg(not(feature = "database"))]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype,
-    token, Address, Env, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec,
 };
 
 // Database module requires std and specific dependencies
@@ -37,7 +37,7 @@ pub enum Error {
     NotInitialized = 2,
     Unauthorized = 3,
     InvalidFeeRate = 4,
-    ContractPaused = 5, 
+    ContractPaused = 5,
     OrderNotFound = 100,
     InvalidOrderStatus = 101,
     OrderExpired = 102,
@@ -50,7 +50,7 @@ pub enum Error {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OrderStatus {
     Open,
-    Locked, 
+    Locked,
     PaymentSent,
     Completed,
     Disputed,
@@ -65,7 +65,7 @@ pub struct Order {
     pub seller: Address,
     pub buyer: Option<Address>,
     pub token: Address,
-    pub amount: i128, 
+    pub amount: i128,
     pub fiat_currency: Symbol,
     pub fiat_amount: i128,
     pub rate: i128,
@@ -84,14 +84,14 @@ pub enum DataKey {
     Order(u64),
     UserOrders(Address),
     FeeRate,
-    FeeTreasury, 
+    FeeTreasury,
     IsPaused,
     DisputeResolver,
 }
 
 #[cfg(not(feature = "database"))]
 #[contract]
-pub struct EscrowContract; 
+pub struct EscrowContract;
 
 #[cfg(not(feature = "database"))]
 #[contractimpl]
@@ -311,7 +311,7 @@ impl EscrowContract {
 #[cfg(all(test, not(feature = "database")))]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _ , Ledger};
+    use soroban_sdk::testutils::{Address as _, Ledger};
     use soroban_sdk::{Address, Env};
 
     fn create_env() -> Env {

@@ -8,50 +8,25 @@ pub enum DatabaseErrorKind {
     /// Connection timeout
     ConnectionTimeout,
     /// Record not found
-    NotFound {
-        entity: String,
-        id: String,
-    },
+    NotFound { entity: String, id: String },
     /// Unique constraint violation (e.g., duplicate key)
-    UniqueConstraintViolation {
-        column: String,
-        value: String,
-    },
+    UniqueConstraintViolation { column: String, value: String },
     /// Foreign key constraint violation
-    ForeignKeyViolation {
-        table: String,
-        column: String,
-    },
+    ForeignKeyViolation { table: String, column: String },
     /// Query execution error
-    QueryError {
-        message: String,
-    },
+    QueryError { message: String },
     /// Transaction error
-    TransactionError {
-        message: String,
-    },
+    TransactionError { message: String },
     /// Database connection error
-    ConnectionError {
-        message: String,
-    },
+    ConnectionError { message: String },
     /// Insufficient balance or quota
-    InsufficientBalance {
-        available: String,
-        required: String,
-    },
+    InsufficientBalance { available: String, required: String },
     /// Trustline not found
-    TrustlineNotFound {
-        account: String,
-        asset: String,
-    },
+    TrustlineNotFound { account: String, asset: String },
     /// Configuration error
-    ConfigError {
-        message: String,
-    },
+    ConfigError { message: String },
     /// Unknown error
-    Unknown {
-        message: String,
-    },
+    Unknown { message: String },
 }
 
 /// Result type for database operations
@@ -108,17 +83,13 @@ impl DatabaseError {
                 entity: "Record".to_string(),
                 id: "unknown".to_string(),
             }),
-            sqlx::Error::PoolTimedOut => {
-                Self::new(DatabaseErrorKind::PoolExhausted)
-            }
-            sqlx::Error::PoolClosed => {
-                Self::new(DatabaseErrorKind::ConnectionError {
-                    message: "Connection pool is closed".to_string(),
-                })
-            }
-            sqlx::Error::Configuration(msg) => {
-                Self::new(DatabaseErrorKind::ConfigError { message: msg.to_string() })
-            }
+            sqlx::Error::PoolTimedOut => Self::new(DatabaseErrorKind::PoolExhausted),
+            sqlx::Error::PoolClosed => Self::new(DatabaseErrorKind::ConnectionError {
+                message: "Connection pool is closed".to_string(),
+            }),
+            sqlx::Error::Configuration(msg) => Self::new(DatabaseErrorKind::ConfigError {
+                message: msg.to_string(),
+            }),
             sqlx::Error::Database(db_err) => {
                 // Handle database-specific errors using trait methods
                 let code = db_err.code();
@@ -142,11 +113,9 @@ impl DatabaseError {
                     }),
                 }
             }
-            sqlx::Error::Io(io_err) => {
-                Self::new(DatabaseErrorKind::ConnectionError {
-                    message: io_err.to_string(),
-                })
-            }
+            sqlx::Error::Io(io_err) => Self::new(DatabaseErrorKind::ConnectionError {
+                message: io_err.to_string(),
+            }),
             _ => Self::new(DatabaseErrorKind::Unknown {
                 message: error.to_string(),
             }),
@@ -194,7 +163,10 @@ impl fmt::Display for DatabaseError {
                 )
             }
             DatabaseErrorKind::TrustlineNotFound { account, asset } => {
-                format!("Trustline not found for account '{}' and asset '{}'", account, asset)
+                format!(
+                    "Trustline not found for account '{}' and asset '{}'",
+                    account, asset
+                )
             }
             DatabaseErrorKind::ConfigError { message } => {
                 format!("Database configuration error: {}", message)
@@ -219,7 +191,7 @@ impl std::error::Error for DatabaseError {}
 impl From<DatabaseError> for crate::error::AppError {
     fn from(err: DatabaseError) -> Self {
         use crate::error::{AppError, AppErrorKind, DomainError, InfrastructureError};
-        
+
         let kind = match &err.kind {
             DatabaseErrorKind::NotFound { entity, id } => {
                 // Map to appropriate domain error
@@ -227,22 +199,20 @@ impl From<DatabaseError> for crate::error::AppError {
                     AppErrorKind::Domain(DomainError::WalletNotFound {
                         wallet_address: id.clone(),
                     })
-                } else if entity.to_lowercase().contains("transaction") {
-                    AppErrorKind::Domain(DomainError::TransactionNotFound {
-                        transaction_id: id.clone(),
-                    })
                 } else {
+                    // Default to TransactionNotFound for other entities
                     AppErrorKind::Domain(DomainError::TransactionNotFound {
                         transaction_id: id.clone(),
                     })
                 }
             }
-            DatabaseErrorKind::InsufficientBalance { available, required } => {
-                AppErrorKind::Domain(DomainError::InsufficientBalance {
-                    available: available.clone(),
-                    required: required.clone(),
-                })
-            }
+            DatabaseErrorKind::InsufficientBalance {
+                available,
+                required,
+            } => AppErrorKind::Domain(DomainError::InsufficientBalance {
+                available: available.clone(),
+                required: required.clone(),
+            }),
             DatabaseErrorKind::TrustlineNotFound { account, asset } => {
                 AppErrorKind::Domain(DomainError::TrustlineNotFound {
                     wallet_address: account.clone(),
@@ -254,14 +224,12 @@ impl From<DatabaseError> for crate::error::AppError {
                     transaction_id: "unknown".to_string(),
                 })
             }
-            _ => {
-                AppErrorKind::Infrastructure(InfrastructureError::Database {
-                    message: err.to_string(),
-                    is_retryable: err.is_retryable(),
-                })
-            }
+            _ => AppErrorKind::Infrastructure(InfrastructureError::Database {
+                message: err.to_string(),
+                is_retryable: err.is_retryable(),
+            }),
         };
-        
+
         let mut app_error = AppError::new(kind);
         if let Some(context) = err.context {
             app_error = app_error.with_context(context);

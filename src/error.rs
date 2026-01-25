@@ -37,7 +37,7 @@ pub enum ErrorCode {
     InvalidAmount,
     #[serde(rename = "DUPLICATE_TRANSACTION")]
     DuplicateTransaction,
-    
+
     // Infrastructure errors (5xx)
     #[serde(rename = "DATABASE_ERROR")]
     DatabaseError,
@@ -45,7 +45,7 @@ pub enum ErrorCode {
     CacheError,
     #[serde(rename = "CONFIGURATION_ERROR")]
     ConfigurationError,
-    
+
     // External errors (502, 503, 504)
     #[serde(rename = "PAYMENT_PROVIDER_ERROR")]
     PaymentProviderError,
@@ -55,7 +55,7 @@ pub enum ErrorCode {
     RateLimitError,
     #[serde(rename = "EXTERNAL_SERVICE_TIMEOUT")]
     ExternalServiceTimeout,
-    
+
     // Generic
     #[serde(rename = "INTERNAL_ERROR")]
     InternalError,
@@ -68,36 +68,22 @@ pub enum ErrorCode {
 #[derive(Debug, Clone)]
 pub enum DomainError {
     /// User doesn't have enough AFRI tokens for the operation
-    InsufficientBalance {
-        available: String,
-        required: String,
-    },
+    InsufficientBalance { available: String, required: String },
     /// Wallet hasn't established AFRI trustline
     TrustlineNotFound {
         wallet_address: String,
         asset: String,
     },
     /// Amount is invalid (negative, zero, or out of range)
-    InvalidAmount {
-        amount: String,
-        reason: String,
-    },
+    InvalidAmount { amount: String, reason: String },
     /// Transaction with given ID doesn't exist
-    TransactionNotFound {
-        transaction_id: String,
-    },
+    TransactionNotFound { transaction_id: String },
     /// Wallet doesn't exist in the system
-    WalletNotFound {
-        wallet_address: String,
-    },
+    WalletNotFound { wallet_address: String },
     /// Exchange rate quote has expired
-    RateExpired {
-        quote_id: String,
-    },
+    RateExpired { quote_id: String },
     /// Duplicate transaction attempt
-    DuplicateTransaction {
-        transaction_id: String,
-    },
+    DuplicateTransaction { transaction_id: String },
     /// Failed to create trustline on Stellar
     TrustlineCreationFailed {
         wallet_address: String,
@@ -110,18 +96,11 @@ pub enum DomainError {
 #[derive(Debug, Clone)]
 pub enum InfrastructureError {
     /// Database connection or query failure
-    Database {
-        message: String,
-        is_retryable: bool,
-    },
+    Database { message: String, is_retryable: bool },
     /// Redis cache unavailable
-    Cache {
-        message: String,
-    },
+    Cache { message: String },
     /// Missing or invalid configuration
-    Configuration {
-        message: String,
-    },
+    Configuration { message: String },
 }
 
 /// External service errors (payment providers, blockchain)
@@ -135,20 +114,14 @@ pub enum ExternalError {
         is_retryable: bool,
     },
     /// Stellar blockchain error
-    Blockchain {
-        message: String,
-        is_retryable: bool,
-    },
+    Blockchain { message: String, is_retryable: bool },
     /// Rate limit exceeded
     RateLimit {
         service: String,
         retry_after: Option<u64>,
     },
     /// External service timeout
-    Timeout {
-        service: String,
-        timeout_secs: u64,
-    },
+    Timeout { service: String, timeout_secs: u64 },
 }
 
 /// Input validation errors
@@ -156,24 +129,13 @@ pub enum ExternalError {
 #[derive(Debug, Clone)]
 pub enum ValidationError {
     /// Invalid Stellar wallet address format
-    InvalidWalletAddress {
-        address: String,
-        reason: String,
-    },
+    InvalidWalletAddress { address: String, reason: String },
     /// Unsupported or invalid currency pair
-    InvalidCurrency {
-        currency: String,
-        reason: String,
-    },
+    InvalidCurrency { currency: String, reason: String },
     /// Invalid amount (format or value)
-    InvalidAmount {
-        amount: String,
-        reason: String,
-    },
+    InvalidAmount { amount: String, reason: String },
     /// Required field missing
-    MissingField {
-        field: String,
-    },
+    MissingField { field: String },
     /// Field value out of acceptable range
     OutOfRange {
         field: String,
@@ -242,7 +204,7 @@ impl AppError {
                 ExternalError::PaymentProvider { .. } => 502, // Bad Gateway
                 ExternalError::Blockchain { .. } => 502,
                 ExternalError::RateLimit { .. } => 429, // Too Many Requests
-                ExternalError::Timeout { .. } => 504, // Gateway Timeout
+                ExternalError::Timeout { .. } => 504,   // Gateway Timeout
             },
             AppErrorKind::Validation(err) => match err {
                 ValidationError::InvalidWalletAddress { .. } => 400,
@@ -286,11 +248,24 @@ impl AppError {
     pub fn user_message(&self) -> String {
         match &self.kind {
             AppErrorKind::Domain(err) => match err {
-                DomainError::InsufficientBalance { available, required } => {
-                    format!("Insufficient AFRI balance. Available: {}, Required: {}", available, required)
+                DomainError::InsufficientBalance {
+                    available,
+                    required,
+                } => {
+                    format!(
+                        "Insufficient AFRI balance. Available: {}, Required: {}",
+                        available, required
+                    )
                 }
-                DomainError::TrustlineNotFound { wallet_address, asset } => {
-                    format!("Please add {} trustline to your wallet ({}...)", asset, &wallet_address[..6])
+                DomainError::TrustlineNotFound {
+                    wallet_address,
+                    asset,
+                } => {
+                    format!(
+                        "Please add {} trustline to your wallet ({}...)",
+                        asset,
+                        &wallet_address[..6]
+                    )
                 }
                 DomainError::InvalidAmount { amount, reason } => {
                     format!("Invalid amount '{}': {}", amount, reason)
@@ -302,44 +277,75 @@ impl AppError {
                     format!("Wallet '{}...' not found", &wallet_address[..6])
                 }
                 DomainError::RateExpired { quote_id } => {
-                    format!("Exchange rate quote '{}' has expired. Please request a new quote", quote_id)
+                    format!(
+                        "Exchange rate quote '{}' has expired. Please request a new quote",
+                        quote_id
+                    )
                 }
                 DomainError::DuplicateTransaction { transaction_id } => {
                     format!("Transaction '{}' already exists", transaction_id)
                 }
-                DomainError::TrustlineCreationFailed { wallet_address, reason } => {
-                    format!("Failed to create trustline for wallet '{}...': {}", &wallet_address[..6], reason)
+                DomainError::TrustlineCreationFailed {
+                    wallet_address,
+                    reason,
+                } => {
+                    format!(
+                        "Failed to create trustline for wallet '{}...': {}",
+                        &wallet_address[..6],
+                        reason
+                    )
                 }
             },
             AppErrorKind::Infrastructure(_) => {
                 "Service temporarily unavailable. Please try again later".to_string()
             }
-            AppErrorKind::External(err) => match err {
-                ExternalError::PaymentProvider { provider, is_retryable, .. } => {
-                    if *is_retryable {
-                        format!("Payment provider ({}) is temporarily unavailable. Please try again", provider)
-                    } else {
-                        format!("Payment processing failed. Please contact support")
+            AppErrorKind::External(err) => {
+                match err {
+                    ExternalError::PaymentProvider {
+                        provider,
+                        is_retryable,
+                        ..
+                    } => {
+                        if *is_retryable {
+                            format!("Payment provider ({}) is temporarily unavailable. Please try again", provider)
+                        } else {
+                            "Payment processing failed. Please contact support".to_string()
+                        }
+                    }
+                    ExternalError::Blockchain { is_retryable, .. } => {
+                        if *is_retryable {
+                            "Blockchain network is busy. Please try again in a moment".to_string()
+                        } else {
+                            "Blockchain operation failed. Please contact support".to_string()
+                        }
+                    }
+                    ExternalError::RateLimit {
+                        service,
+                        retry_after,
+                    } => {
+                        if let Some(secs) = retry_after {
+                            format!(
+                                "Rate limit exceeded for {}. Please try again in {} seconds",
+                                service, secs
+                            )
+                        } else {
+                            format!(
+                                "Rate limit exceeded for {}. Please try again later",
+                                service
+                            )
+                        }
+                    }
+                    ExternalError::Timeout {
+                        service,
+                        timeout_secs,
+                    } => {
+                        format!(
+                            "{} request timed out after {} seconds. Please try again",
+                            service, timeout_secs
+                        )
                     }
                 }
-                ExternalError::Blockchain { is_retryable, .. } => {
-                    if *is_retryable {
-                        "Blockchain network is busy. Please try again in a moment".to_string()
-                    } else {
-                        "Blockchain operation failed. Please contact support".to_string()
-                    }
-                }
-                ExternalError::RateLimit { service, retry_after } => {
-                    if let Some(secs) = retry_after {
-                        format!("Rate limit exceeded for {}. Please try again in {} seconds", service, secs)
-                    } else {
-                        format!("Rate limit exceeded for {}. Please try again later", service)
-                    }
-                }
-                ExternalError::Timeout { service, timeout_secs } => {
-                    format!("{} request timed out after {} seconds. Please try again", service, timeout_secs)
-                }
-            },
+            }
             AppErrorKind::Validation(err) => match err {
                 ValidationError::InvalidWalletAddress { address, reason } => {
                     format!("Invalid wallet address '{}': {}", address, reason)
@@ -353,22 +359,20 @@ impl AppError {
                 ValidationError::MissingField { field } => {
                     format!("Required field '{}' is missing", field)
                 }
-                ValidationError::OutOfRange { field, min, max } => {
-                    match (min, max) {
-                        (Some(min), Some(max)) => {
-                            format!("Field '{}' must be between {} and {}", field, min, max)
-                        }
-                        (Some(min), None) => {
-                            format!("Field '{}' must be at least {}", field, min)
-                        }
-                        (None, Some(max)) => {
-                            format!("Field '{}' must be at most {}", field, max)
-                        }
-                        (None, None) => {
-                            format!("Field '{}' is out of acceptable range", field)
-                        }
+                ValidationError::OutOfRange { field, min, max } => match (min, max) {
+                    (Some(min), Some(max)) => {
+                        format!("Field '{}' must be between {} and {}", field, min, max)
                     }
-                }
+                    (Some(min), None) => {
+                        format!("Field '{}' must be at least {}", field, min)
+                    }
+                    (None, Some(max)) => {
+                        format!("Field '{}' must be at most {}", field, max)
+                    }
+                    (None, None) => {
+                        format!("Field '{}' is out of acceptable range", field)
+                    }
+                },
             },
         }
     }
@@ -410,31 +414,25 @@ impl std::error::Error for AppError {}
 impl From<StellarError> for AppError {
     fn from(err: StellarError) -> Self {
         use crate::chains::stellar::errors::StellarError as SE;
-        
+
         let kind = match err {
-            SE::AccountNotFound { address } => {
-                AppErrorKind::Domain(DomainError::WalletNotFound {
-                    wallet_address: address,
-                })
-            }
+            SE::AccountNotFound { address } => AppErrorKind::Domain(DomainError::WalletNotFound {
+                wallet_address: address,
+            }),
             SE::InvalidAddress { address } => {
                 AppErrorKind::Validation(ValidationError::InvalidWalletAddress {
                     address,
                     reason: "Invalid Stellar address format".to_string(),
                 })
             }
-            SE::RateLimitError => {
-                AppErrorKind::External(ExternalError::RateLimit {
-                    service: "Stellar".to_string(),
-                    retry_after: Some(60),
-                })
-            }
-            SE::TimeoutError { seconds } => {
-                AppErrorKind::External(ExternalError::Timeout {
-                    service: "Stellar".to_string(),
-                    timeout_secs: seconds,
-                })
-            }
+            SE::RateLimitError => AppErrorKind::External(ExternalError::RateLimit {
+                service: "Stellar".to_string(),
+                retry_after: Some(60),
+            }),
+            SE::TimeoutError { seconds } => AppErrorKind::External(ExternalError::Timeout {
+                service: "Stellar".to_string(),
+                timeout_secs: seconds,
+            }),
             SE::NetworkError { message } | SE::UnexpectedError { message } => {
                 AppErrorKind::External(ExternalError::Blockchain {
                     message,
@@ -442,18 +440,14 @@ impl From<StellarError> for AppError {
                 })
             }
             SE::ConfigError { message } => {
-                AppErrorKind::Infrastructure(InfrastructureError::Configuration {
-                    message,
-                })
+                AppErrorKind::Infrastructure(InfrastructureError::Configuration { message })
             }
-            _ => {
-                AppErrorKind::External(ExternalError::Blockchain {
-                    message: err.to_string(),
-                    is_retryable: false,
-                })
-            }
+            _ => AppErrorKind::External(ExternalError::Blockchain {
+                message: err.to_string(),
+                is_retryable: false,
+            }),
         };
-        
+
         AppError::new(kind)
     }
 }

@@ -43,14 +43,11 @@ impl TrustlineRepository {
         .bind(asset_code)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Find all trustlines for an account
-    pub async fn find_by_account(
-        &self,
-        account: &str,
-    ) -> Result<Vec<Trustline>, DatabaseError> {
+    pub async fn find_by_account(&self, account: &str) -> Result<Vec<Trustline>, DatabaseError> {
         sqlx::query_as::<_, Trustline>(
             "SELECT id, account, asset_code, balance, limit, issuer, status, created_at, updated_at 
              FROM trustlines 
@@ -60,7 +57,7 @@ impl TrustlineRepository {
         .bind(account)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Create a new trustline
@@ -87,7 +84,7 @@ impl TrustlineRepository {
         .bind("pending")
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Update trustline balance
@@ -105,7 +102,7 @@ impl TrustlineRepository {
         .bind(trustline_id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Update trustline status
@@ -123,7 +120,7 @@ impl TrustlineRepository {
         .bind(trustline_id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Check if account has sufficient AFRI balance
@@ -135,14 +132,16 @@ impl TrustlineRepository {
     ) -> Result<bool, DatabaseError> {
         match self.find_trustline(account, asset_code).await? {
             Some(trustline) => {
-                let balance: f64 = trustline.balance.parse()
-                    .map_err(|_| DatabaseError::new(crate::database::error::DatabaseErrorKind::QueryError {
+                let balance: f64 = trustline.balance.parse().map_err(|_| {
+                    DatabaseError::new(crate::database::error::DatabaseErrorKind::QueryError {
                         message: "Invalid balance format".to_string(),
-                    }))?;
-                let required: f64 = required_amount.parse()
-                    .map_err(|_| DatabaseError::new(crate::database::error::DatabaseErrorKind::QueryError {
+                    })
+                })?;
+                let required: f64 = required_amount.parse().map_err(|_| {
+                    DatabaseError::new(crate::database::error::DatabaseErrorKind::QueryError {
                         message: "Invalid amount format".to_string(),
-                    }))?;
+                    })
+                })?;
 
                 Ok(balance >= required)
             }
@@ -151,10 +150,7 @@ impl TrustlineRepository {
     }
 
     /// Find all active trustlines for asset
-    pub async fn find_by_asset(
-        &self,
-        asset_code: &str,
-    ) -> Result<Vec<Trustline>, DatabaseError> {
+    pub async fn find_by_asset(&self, asset_code: &str) -> Result<Vec<Trustline>, DatabaseError> {
         sqlx::query_as::<_, Trustline>(
             "SELECT id, account, asset_code, balance, limit, issuer, status, created_at, updated_at 
              FROM trustlines 
@@ -164,7 +160,7 @@ impl TrustlineRepository {
         .bind(asset_code)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 }
 
@@ -180,7 +176,7 @@ impl Repository for TrustlineRepository {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn find_all(&self) -> Result<Vec<Self::Entity>, DatabaseError> {
@@ -190,7 +186,7 @@ impl Repository for TrustlineRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn insert(&self, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -210,7 +206,7 @@ impl Repository for TrustlineRepository {
         .bind(entity.updated_at)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn update(&self, id: &str, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -229,7 +225,7 @@ impl Repository for TrustlineRepository {
         .bind(id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn delete(&self, id: &str) -> Result<bool, DatabaseError> {
@@ -237,7 +233,7 @@ impl Repository for TrustlineRepository {
             .bind(id)
             .execute(&self.pool)
             .await
-            .map_err(|e| DatabaseError::from_sqlx(e))?;
+            .map_err(DatabaseError::from_sqlx)?;
 
         Ok(result.rows_affected() > 0)
     }

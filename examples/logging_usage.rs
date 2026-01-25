@@ -10,8 +10,10 @@ use aframp::{
     error::{AppError, AppErrorKind, ValidationError},
     logging::{init_tracing, mask_wallet_address},
     middleware::{
-        logging::{request_logging_middleware, UuidRequestId, log_database_query, log_external_call},
         error::success_response,
+        logging::{
+            log_database_query, log_external_call, request_logging_middleware, UuidRequestId,
+        },
     },
 };
 
@@ -21,11 +23,11 @@ use axum::{
     Json, Router,
 };
 #[cfg(feature = "database")]
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "database")]
 use tower::ServiceBuilder;
 #[cfg(feature = "database")]
-use tower_http::request_id::{SetRequestIdLayer, PropagateRequestIdLayer};
-#[cfg(feature = "database")]
-use serde::{Deserialize, Serialize};
+use tower_http::request_id::{PropagateRequestIdLayer, SetRequestIdLayer};
 #[cfg(feature = "database")]
 use tracing::info;
 
@@ -78,24 +80,17 @@ async fn onramp_handler(
     }
 
     // Simulate database query with logging
-    let transaction_id = log_database_query(
-        "INSERT INTO transactions VALUES (...)",
-        async {
-            // Your database operation here
-            Ok::<_, AppError>("tx_12345".to_string())
-        },
-    )
+    let transaction_id = log_database_query("INSERT INTO transactions VALUES (...)", async {
+        // Your database operation here
+        Ok::<_, AppError>("tx_12345".to_string())
+    })
     .await?;
 
     // Simulate external API call with logging
-    log_external_call(
-        "Stellar",
-        "POST /transactions",
-        async {
-            // Your external API call here
-            Ok::<_, AppError>(())
-        },
-    )
+    log_external_call("Stellar", "POST /transactions", async {
+        // Your external API call here
+        Ok::<_, AppError>(())
+    })
     .await?;
 
     // Log successful completion
@@ -137,7 +132,7 @@ pub fn build_app() -> Router {
                 // Log requests and responses
                 .layer(axum::middleware::from_fn(request_logging_middleware))
                 // Propagate request IDs in response headers
-                .layer(PropagateRequestIdLayer::x_request_id())
+                .layer(PropagateRequestIdLayer::x_request_id()),
         )
 }
 

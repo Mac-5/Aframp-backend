@@ -4,6 +4,8 @@
 //! HTTP status codes, error codes, and user-friendly messages.
 
 #[cfg(feature = "database")]
+use crate::error::{AppError, ErrorCode};
+#[cfg(feature = "database")]
 use axum::{
     extract::Request,
     http::StatusCode,
@@ -11,11 +13,9 @@ use axum::{
     Json,
 };
 #[cfg(feature = "database")]
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "database")]
 use chrono::Utc;
 #[cfg(feature = "database")]
-use crate::error::{AppError, ErrorCode};
+use serde::{Deserialize, Serialize};
 
 /// Standardized error response structure
 ///
@@ -26,20 +26,20 @@ use crate::error::{AppError, ErrorCode};
 pub struct ErrorResponse {
     /// Machine-readable error code
     pub error: ErrorCode,
-    
+
     /// Human-readable error message
     pub message: String,
-    
+
     /// Request ID for debugging and support
     pub request_id: Option<String>,
-    
+
     /// ISO 8601 timestamp of the error
     pub timestamp: String,
-    
+
     /// Optional additional details (e.g., validation errors)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
-    
+
     /// Whether the client should retry the request
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retryable: Option<bool>,
@@ -78,11 +78,7 @@ impl ErrorResponse {
     }
 
     /// Create a validation error response with field details
-    pub fn validation_error(
-        request_id: Option<String>,
-        field: &str,
-        message: &str,
-    ) -> Self {
+    pub fn validation_error(request_id: Option<String>, field: &str, message: &str) -> Self {
         Self {
             error: ErrorCode::ValidationError,
             message: format!("Validation failed for field '{}'", field),
@@ -102,8 +98,8 @@ impl ErrorResponse {
 #[cfg(feature = "database")]
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let status_code = StatusCode::from_u16(self.status_code())
-            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status_code =
+            StatusCode::from_u16(self.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
         // Log the error with context
         if status_code.is_server_error() {
@@ -220,20 +216,14 @@ pub fn get_request_id_from_headers(headers: &axum::http::HeaderMap) -> Option<St
 mod tests {
     use super::*;
     use crate::error::{AppError, AppErrorKind, DomainError, ValidationError};
-    use axum::{
-        body::Body,
-        http::StatusCode,
-        response::IntoResponse,
-    };
+    use axum::{http::StatusCode, response::IntoResponse};
 
     #[test]
     fn test_error_response_from_app_error() {
-        let app_error = AppError::new(AppErrorKind::Domain(
-            DomainError::InsufficientBalance {
-                available: "50".to_string(),
-                required: "100".to_string(),
-            },
-        ))
+        let app_error = AppError::new(AppErrorKind::Domain(DomainError::InsufficientBalance {
+            available: "50".to_string(),
+            required: "100".to_string(),
+        }))
         .with_request_id("req_123");
 
         let error_response = ErrorResponse::from_app_error(&app_error);
@@ -245,12 +235,10 @@ mod tests {
 
     #[test]
     fn test_app_error_into_response() {
-        let app_error = AppError::new(AppErrorKind::Validation(
-            ValidationError::InvalidAmount {
-                amount: "-100".to_string(),
-                reason: "Amount cannot be negative".to_string(),
-            },
-        ));
+        let app_error = AppError::new(AppErrorKind::Validation(ValidationError::InvalidAmount {
+            amount: "-100".to_string(),
+            reason: "Amount cannot be negative".to_string(),
+        }));
 
         let response = app_error.into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -281,12 +269,11 @@ mod tests {
     #[test]
     fn test_status_code_mapping() {
         // Test domain errors
-        let insufficient_balance = AppError::new(AppErrorKind::Domain(
-            DomainError::InsufficientBalance {
+        let insufficient_balance =
+            AppError::new(AppErrorKind::Domain(DomainError::InsufficientBalance {
                 available: "0".to_string(),
                 required: "100".to_string(),
-            },
-        ));
+            }));
         assert_eq!(insufficient_balance.status_code(), 422);
 
         // Test validation errors
@@ -302,7 +289,7 @@ mod tests {
     #[tokio::test]
     async fn test_success_response() {
         use serde_json::json;
-        
+
         let response = success_response(json!({
             "id": 123,
             "status": "success"

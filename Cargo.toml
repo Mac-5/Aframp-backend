@@ -7,11 +7,11 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = []
-database = ["sqlx", "tokio", "async-trait", "uuid", "chrono", "serde", "serde_json", "tracing", "tracing-subscriber", "axum", "tower", "tower-http", "regex", "http"]
+default = ["database"]
+database = ["dep:sqlx", "dep:tokio", "dep:async-trait", "dep:uuid", "dep:chrono", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:axum", "dep:tower", "dep:tower-http", "dep:regex", "dep:http"]
 
 [dependencies]
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono", "json", "macros"], optional = true }
+sqlx = { version = "0.8.1", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono", "json", "macros"], optional = true }
 soroban-sdk = "21.0.0"
 tokio = { version = "1.36", features = ["full"], optional = true }
 async-trait = { version = "0.1", optional = true }
@@ -34,11 +34,12 @@ base64 = "0.21"
 anyhow = "1.0"
 thiserror = "1.0"
 regex = { version = "1.10", optional = true }
+rsa = "0.9.10"
+sad-rsa = "0.1.1"
 
 [[bin]]
 name = "Bitmesh-backend"
 path = "src/main.rs"
-required-features = ["tokio", "tracing", "tracing-subscriber", "serde", "serde_json", "chrono"]
 
 [dev-dependencies]
 soroban-sdk = { version = "21.0.0", features = ["testutils"] }

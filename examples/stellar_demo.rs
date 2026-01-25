@@ -1,4 +1,7 @@
-use Bitmesh_backend::chains::stellar::{client::StellarClient, config::{StellarConfig, StellarNetwork}};
+use Bitmesh_backend::chains::stellar::{
+    client::StellarClient,
+    config::{StellarConfig, StellarNetwork},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

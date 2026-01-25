@@ -2,8 +2,7 @@ mod chains;
 
 use chains::stellar::client::StellarClient;
 use chains::stellar::config::StellarConfig;
-use tracing::{error, info};
-use tracing_subscriber;
+use tracing::error;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -13,17 +12,15 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Starting Aframp backend service");
 
-    let stellar_config = StellarConfig::from_env()
-        .map_err(|e| {
-            error!("Failed to load Stellar configuration: {}", e);
-            e
-        })?;
+    let stellar_config = StellarConfig::from_env().map_err(|e| {
+        error!("Failed to load Stellar configuration: {}", e);
+        e
+    })?;
 
-    let stellar_client = StellarClient::new(stellar_config)
-        .map_err(|e| {
-            error!("Failed to initialize Stellar client: {}", e);
-            e
-        })?;
+    let stellar_client = StellarClient::new(stellar_config).map_err(|e| {
+        error!("Failed to initialize Stellar client: {}", e);
+        e
+    })?;
 
     println!("Stellar client initialized successfully");
 
@@ -36,20 +33,21 @@ async fn main() -> anyhow::Result<()> {
     } else {
         error!(
             "Stellar Horizon health check failed: {}",
-            health_status.error_message.unwrap_or_else(|| "Unknown error".to_string())
+            health_status
+                .error_message
+                .unwrap_or_else(|| "Unknown error".to_string())
         );
     }
 
     // Demo functionality
     println!("=== Demo: Testing Stellar functionality ===");
     // Use a properly formatted 56-character Stellar address (this may not exist, but tests validation)
-    let test_address = "GD5DJQDQKNR7DSXJVNJTV3P5JJH4KJVTI2JZNYUYIIKHTDNJQXECM4JQ";
-    
+    let test_address = "GCJRI5CIWK5IU67Q6DGA7QW52JDKRO7JEAHQKFNDUJUPEZGURDBX3LDX";
+
     match stellar_client.account_exists(test_address).await {
         Ok(exists) => {
             if exists {
                 println!("Account {} exists", test_address);
-                
                 match stellar_client.get_account(test_address).await {
                     Ok(account) => {
                         println!("Successfully fetched account details");
@@ -70,6 +68,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     println!("Aframp backend service started successfully");
-    
+
     Ok(())
 }

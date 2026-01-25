@@ -8,6 +8,7 @@ pub enum StellarNetwork {
     Mainnet,
 }
 
+#[allow(dead_code)]
 impl StellarNetwork {
     pub fn horizon_url(&self) -> &'static str {
         match self {
@@ -36,7 +37,7 @@ impl Default for StellarConfig {
     fn default() -> Self {
         Self {
             network: StellarNetwork::Testnet,
-            request_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(15),
             max_retries: 3,
             health_check_interval: Duration::from_secs(30),
         }
@@ -69,8 +70,8 @@ impl StellarConfig {
             .and_then(|s| s.parse().ok())
             .map(Duration::from_secs)
             .unwrap_or_else(|| {
-                info!("Using default request timeout: 10 seconds");
-                Duration::from_secs(10)
+                info!("Using default request timeout: 15 seconds");
+                Duration::from_secs(15)
             });
 
         let max_retries = std::env::var("STELLAR_MAX_RETRIES")

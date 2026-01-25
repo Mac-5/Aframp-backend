@@ -55,7 +55,7 @@ impl WebhookRepository {
         .bind(transaction_id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Get pending webhook events
@@ -69,14 +69,11 @@ impl WebhookRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Mark webhook event as processed
-    pub async fn mark_processed(
-        &self,
-        id: Uuid,
-    ) -> Result<WebhookEvent, DatabaseError> {
+    pub async fn mark_processed(&self, id: Uuid) -> Result<WebhookEvent, DatabaseError> {
         sqlx::query_as::<_, WebhookEvent>(
             "UPDATE webhook_events SET status = 'completed', processed_at = NOW() WHERE id = $1 
              RETURNING id, event_id, provider, event_type, payload, signature, status, transaction_id, processed_at, retry_count, error_message, created_at, updated_at",
@@ -84,7 +81,7 @@ impl WebhookRepository {
         .bind(id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Record webhook processing failure
@@ -103,7 +100,7 @@ impl WebhookRepository {
         .bind(error)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Get webhook events by provider
@@ -122,7 +119,7 @@ impl WebhookRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     /// Get failed webhook events
@@ -136,7 +133,7 @@ impl WebhookRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 }
 
@@ -145,7 +142,11 @@ impl Repository for WebhookRepository {
     type Entity = WebhookEvent;
 
     async fn find_by_id(&self, id: &str) -> Result<Option<Self::Entity>, DatabaseError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| DatabaseError::new(DatabaseErrorKind::Unknown { message: format!("Invalid UUID: {}", e) }))?;
+        let uuid = Uuid::parse_str(id).map_err(|e| {
+            DatabaseError::new(DatabaseErrorKind::Unknown {
+                message: format!("Invalid UUID: {}", e),
+            })
+        })?;
         sqlx::query_as::<_, WebhookEvent>(
              "SELECT id, event_id, provider, event_type, payload, signature, status, transaction_id, processed_at, retry_count, error_message, created_at, updated_at 
              FROM webhook_events WHERE id = $1",
@@ -153,7 +154,7 @@ impl Repository for WebhookRepository {
         .bind(uuid)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn find_all(&self) -> Result<Vec<Self::Entity>, DatabaseError> {
@@ -163,7 +164,7 @@ impl Repository for WebhookRepository {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn insert(&self, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
@@ -185,11 +186,15 @@ impl Repository for WebhookRepository {
         .bind(entity.created_at)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn update(&self, id: &str, entity: &Self::Entity) -> Result<Self::Entity, DatabaseError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| DatabaseError::new(DatabaseErrorKind::Unknown { message: format!("Invalid UUID: {}", e) }))?;
+        let uuid = Uuid::parse_str(id).map_err(|e| {
+            DatabaseError::new(DatabaseErrorKind::Unknown {
+                message: format!("Invalid UUID: {}", e),
+            })
+        })?;
         sqlx::query_as::<_, WebhookEvent>(
             "UPDATE webhook_events 
              SET event_id = $1, provider = $2, event_type = $3, payload = $4, signature = $5, status = $6, transaction_id = $7, processed_at = $8, retry_count = $9, error_message = $10 
@@ -209,16 +214,20 @@ impl Repository for WebhookRepository {
         .bind(uuid)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| DatabaseError::from_sqlx(e))
+        .map_err(DatabaseError::from_sqlx)
     }
 
     async fn delete(&self, id: &str) -> Result<bool, DatabaseError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| DatabaseError::new(DatabaseErrorKind::Unknown { message: format!("Invalid UUID: {}", e) }))?;
+        let uuid = Uuid::parse_str(id).map_err(|e| {
+            DatabaseError::new(DatabaseErrorKind::Unknown {
+                message: format!("Invalid UUID: {}", e),
+            })
+        })?;
         let result = sqlx::query("DELETE FROM webhook_events WHERE id = $1")
             .bind(uuid)
             .execute(&self.pool)
             .await
-            .map_err(|e| DatabaseError::from_sqlx(e))?;
+            .map_err(DatabaseError::from_sqlx)?;
 
         Ok(result.rows_affected() > 0)
     }

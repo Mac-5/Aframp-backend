@@ -1,21 +1,20 @@
 // This module requires std library (not available in WASM)
-#![cfg(feature = "database")]
 
+pub mod bill_payment_repository;
 pub mod error;
+pub mod exchange_rate_repository;
+pub mod payment_repository;
 pub mod repository;
 pub mod transaction;
-pub mod wallet_repository;
 pub mod transaction_repository;
-pub mod exchange_rate_repository;
-pub mod webhook_repository;
 pub mod trustline_repository;
-pub mod payment_repository;
-pub mod bill_payment_repository;
+pub mod wallet_repository;
+pub mod webhook_repository;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::time::Duration;
-use tracing::{info, warn, error as log_error};
+use tracing::{error as log_error, info, warn};
 
 use self::error::DatabaseError;
 
@@ -67,12 +66,10 @@ pub async fn init_pool(
         })?;
 
     // Test the connection
-    pool.acquire()
-        .await
-        .map_err(|e| {
-            log_error!("Failed to acquire test connection: {}", e);
-            DatabaseError::from_sqlx(e)
-        })?;
+    pool.acquire().await.map_err(|e| {
+        log_error!("Failed to acquire test connection: {}", e);
+        DatabaseError::from_sqlx(e)
+    })?;
 
     info!("Database pool initialized successfully");
     Ok(pool)
@@ -80,13 +77,10 @@ pub async fn init_pool(
 
 /// Connection pool health check
 pub async fn health_check(pool: &PgPool) -> Result<(), DatabaseError> {
-    let _result = sqlx::query("SELECT 1")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| {
-            warn!("Health check failed: {}", e);
-            DatabaseError::from_sqlx(e)
-        })?;
+    let _result = sqlx::query("SELECT 1").fetch_one(pool).await.map_err(|e| {
+        warn!("Health check failed: {}", e);
+        DatabaseError::from_sqlx(e)
+    })?;
 
     Ok(())
 }
@@ -100,7 +94,7 @@ pub struct PoolStats {
 pub fn get_pool_stats(pool: &PgPool) -> PoolStats {
     PoolStats {
         num_idle: pool.num_idle() as u32,
-        size: pool.size() as u32,
+        size: pool.size(),
     }
 }
 
