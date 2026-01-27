@@ -6,8 +6,8 @@ use soroban_sdk::{
     testutils::{Address as _, Ledger},
 };
 
-use afri_stablecoin::AfrIContract;
-use afri_stablecoin::AfrIContractClient;
+use crate::AfrIContract;
+use crate::AfrIContractClient;
 
 #[test]
 fn mint_transfer_burn_flow_works() {
