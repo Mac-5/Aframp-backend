@@ -1,22 +1,42 @@
-use soroban_sdk::{Env, Address, symbol_short};
+use soroban_sdk::{contractevent, Address};
 
-pub fn transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
-    env.events().publish(
-        (symbol_short!("transfer"), from, to),
-        amount,
-    );
+#[contractevent]
+pub struct Transfer {
+    pub from: Address,
+    pub to: Address,
+    pub amount: i128,
 }
 
-pub fn mint(env: &Env, to: &Address, amount: i128) {
-    env.events().publish(
-        (symbol_short!("mint"), to),
-        amount,
-    );
+#[contractevent]
+pub struct Mint {
+    pub to: Address,
+    pub amount: i128,
 }
 
-pub fn burn(env: &Env, from: &Address, amount: i128) {
-    env.events().publish(
-        (symbol_short!("burn"), from),
+#[contractevent]
+pub struct Burn {
+    pub from: Address,
+    pub amount: i128,
+}
+
+pub fn transfer(env: &soroban_sdk::Env, from: &Address, to: &Address, amount: i128) {
+    env.events().publish(Transfer {
+        from: from.clone(),
+        to: to.clone(),
         amount,
-    );
+    });
+}
+
+pub fn mint(env: &soroban_sdk::Env, to: &Address, amount: i128) {
+    env.events().publish(Mint {
+        to: to.clone(),
+        amount,
+    });
+}
+
+pub fn burn(env: &soroban_sdk::Env, from: &Address, amount: i128) {
+    env.events().publish(Burn {
+        from: from.clone(),
+        amount,
+    });
 }
