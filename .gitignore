@@ -1,6 +1,7 @@
 /target
-.cursor/
+.env.cursor/
 paystack_requirements.md
 progress.md
 task_plan.md
 findings.md
+.env
