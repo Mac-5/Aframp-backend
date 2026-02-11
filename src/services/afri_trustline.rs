@@ -5,7 +5,7 @@
 
 use crate::chains::stellar::{
     client::StellarClient,
-    errors::{StellarError, StellarResult},
+    errors::StellarError,
     types::{AssetBalance, StellarAccountInfo},
 };
 use crate::error::{AppError, AppErrorKind, DomainError, ExternalError};

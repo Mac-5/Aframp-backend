@@ -2,3 +2,11 @@
 
 #[cfg(feature = "database")]
 pub mod afri_trustline;
+#[cfg(feature = "database")]
+pub mod afri_payment_builder;
+#[cfg(feature = "database")]
+pub mod conversion_audit;
+#[cfg(feature = "database")]
+pub mod fee_structure;
+#[cfg(feature = "database")]
+pub mod trustline_operation;

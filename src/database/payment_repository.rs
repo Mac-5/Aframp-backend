@@ -40,6 +40,20 @@ impl PaymentRepository {
         Self { pool }
     }
 
+    /// List all provider configurations
+    pub async fn list_provider_configs(
+        &self,
+    ) -> Result<Vec<PaymentProviderConfig>, DatabaseError> {
+        sqlx::query_as::<_, PaymentProviderConfig>(
+            "SELECT provider, is_enabled, settings, created_at, updated_at 
+             FROM payment_provider_configs 
+             ORDER BY provider ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)
+    }
+
     /// Find a provider configuration by provider name
     pub async fn get_provider_config(
         &self,
@@ -50,6 +64,66 @@ impl PaymentRepository {
         )
         .bind(provider)
         .fetch_optional(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)
+    }
+
+    /// Insert or update a provider configuration
+    pub async fn upsert_provider_config(
+        &self,
+        provider: &str,
+        is_enabled: bool,
+        settings: serde_json::Value,
+    ) -> Result<PaymentProviderConfig, DatabaseError> {
+        sqlx::query_as::<_, PaymentProviderConfig>(
+            "INSERT INTO payment_provider_configs (provider, is_enabled, settings) 
+             VALUES ($1, $2, $3)
+             ON CONFLICT (provider) DO UPDATE 
+             SET is_enabled = EXCLUDED.is_enabled, settings = EXCLUDED.settings, updated_at = NOW()
+             RETURNING provider, is_enabled, settings, created_at, updated_at",
+        )
+        .bind(provider)
+        .bind(is_enabled)
+        .bind(settings)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)
+    }
+
+    /// Enable or disable a provider
+    pub async fn set_provider_enabled(
+        &self,
+        provider: &str,
+        is_enabled: bool,
+    ) -> Result<PaymentProviderConfig, DatabaseError> {
+        sqlx::query_as::<_, PaymentProviderConfig>(
+            "UPDATE payment_provider_configs 
+             SET is_enabled = $2, updated_at = NOW() 
+             WHERE provider = $1
+             RETURNING provider, is_enabled, settings, created_at, updated_at",
+        )
+        .bind(provider)
+        .bind(is_enabled)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)
+    }
+
+    /// Update provider settings
+    pub async fn update_provider_settings(
+        &self,
+        provider: &str,
+        settings: serde_json::Value,
+    ) -> Result<PaymentProviderConfig, DatabaseError> {
+        sqlx::query_as::<_, PaymentProviderConfig>(
+            "UPDATE payment_provider_configs 
+             SET settings = $2, updated_at = NOW()
+             WHERE provider = $1
+             RETURNING provider, is_enabled, settings, created_at, updated_at",
+        )
+        .bind(provider)
+        .bind(settings)
+        .fetch_one(&self.pool)
         .await
         .map_err(DatabaseError::from_sqlx)
     }
@@ -68,6 +142,69 @@ impl PaymentRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(DatabaseError::from_sqlx)
+    }
+
+    /// Get the active payment method for a user
+    pub async fn get_active_method(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<PaymentMethod>, DatabaseError> {
+        sqlx::query_as::<_, PaymentMethod>(
+            "SELECT id, user_id, provider, method_type, phone_number, encrypted_data, is_active, is_deleted, region, created_at, updated_at 
+             FROM payment_methods 
+             WHERE user_id = $1 AND is_deleted = false AND is_active = true
+             ORDER BY updated_at DESC
+             LIMIT 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)
+    }
+
+    /// Set a payment method as the default active method for a user
+    pub async fn set_default_method(
+        &self,
+        user_id: Uuid,
+        method_id: Uuid,
+    ) -> Result<PaymentMethod, DatabaseError> {
+        let mut tx = self.pool.begin().await.map_err(DatabaseError::from_sqlx)?;
+
+        sqlx::query(
+            "UPDATE payment_methods 
+             SET is_active = false 
+             WHERE user_id = $1 AND is_deleted = false",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(DatabaseError::from_sqlx)?;
+
+        let updated = sqlx::query_as::<_, PaymentMethod>(
+            "UPDATE payment_methods 
+             SET is_active = true 
+             WHERE id = $1 AND user_id = $2 AND is_deleted = false
+             RETURNING id, user_id, provider, method_type, phone_number, encrypted_data, is_active, is_deleted, region, created_at, updated_at",
+        )
+        .bind(method_id)
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(DatabaseError::from_sqlx)?;
+
+        let method = match updated {
+            Some(method) => method,
+            None => {
+                tx.rollback().await.map_err(DatabaseError::from_sqlx)?;
+                return Err(DatabaseError::new(DatabaseErrorKind::NotFound {
+                    entity: "PaymentMethod".to_string(),
+                    id: method_id.to_string(),
+                }));
+            }
+        };
+
+        tx.commit().await.map_err(DatabaseError::from_sqlx)?;
+        Ok(method)
     }
 
     /// Soft delete a payment method

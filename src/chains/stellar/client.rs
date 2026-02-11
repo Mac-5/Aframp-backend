@@ -7,6 +7,7 @@ use crate::chains::stellar::{
     },
 };
 use reqwest::Client;
+use serde_json::Value as JsonValue;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
@@ -238,5 +239,77 @@ impl StellarClient {
 
     pub fn network(&self) -> &crate::chains::stellar::config::StellarNetwork {
         &self.config.network
+    }
+
+    pub async fn submit_transaction_xdr(
+        &self,
+        xdr_base64: &str,
+    ) -> StellarResult<JsonValue> {
+        let url = format!("{}/transactions", self.config.network.horizon_url());
+
+        let response = timeout(
+            self.config.request_timeout,
+            self.http_client
+                .post(&url)
+                .header(
+                    reqwest::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(format!("tx={}", encode_form_component(xdr_base64)))
+                .send(),
+        )
+        .await
+        .map_err(|_| StellarError::timeout_error(self.config.request_timeout.as_secs()))?;
+
+        let response = response.map_err(|e| {
+            if e.status() == Some(reqwest::StatusCode::TOO_MANY_REQUESTS) {
+                StellarError::RateLimitError
+            } else {
+                StellarError::network_error(format!("Horizon submit error: {}", e))
+            }
+        })?;
+
+        let status = response.status();
+        let body = response.text().await.map_err(|e| {
+            StellarError::network_error(format!("Horizon submit read error: {}", e))
+        })?;
+
+        if !status.is_success() {
+            return Err(StellarError::network_error(format!(
+                "Horizon submit failed (status {}): {}",
+                status, body
+            )));
+        }
+
+        let json = serde_json::from_str::<JsonValue>(&body).map_err(|e| {
+            StellarError::serialization_error(format!(
+                "Horizon submit JSON parse error: {}",
+                e
+            ))
+        })?;
+
+        Ok(json)
+    }
+}
+
+fn encode_form_component(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            output.push(char::from(b));
+        } else {
+            output.push('%');
+            output.push(hex_char((b >> 4) & 0x0F));
+            output.push(hex_char(b & 0x0F));
+        }
+    }
+    output
+}
+
+fn hex_char(nibble: u8) -> char {
+    match nibble {
+        0..=9 => (b'0' + nibble) as char,
+        10..=15 => (b'A' + nibble - 10) as char,
+        _ => '0',
     }
 }

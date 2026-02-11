@@ -79,6 +79,29 @@ WHERE from_currency = 'NGN' AND to_currency = 'AFRI'
 ORDER BY valid_until DESC 
 LIMIT 1;
 
+-- Active fee lookup (Target: < 5ms)
+EXPLAIN ANALYZE
+SELECT * FROM fee_structures
+WHERE fee_type = 'exchange' AND is_active = TRUE
+  AND effective_from <= NOW()
+  AND (effective_until IS NULL OR effective_until >= NOW())
+ORDER BY effective_from DESC
+LIMIT 1;
+
+-- Conversion audit history (Target: < 20ms)
+EXPLAIN ANALYZE
+SELECT * FROM conversion_audits
+WHERE user_id = 'uuid'
+ORDER BY created_at DESC
+LIMIT 50;
+
+-- Trustline operations history (Target: < 20ms)
+EXPLAIN ANALYZE
+SELECT * FROM trustline_operations
+WHERE wallet_address = 'GXXXXXX'
+ORDER BY created_at DESC
+LIMIT 50;
+
 -- User summary (Target: < 5ms)
 EXPLAIN ANALYZE 
 SELECT * FROM user_transaction_summary 

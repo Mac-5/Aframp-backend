@@ -42,9 +42,10 @@ impl WebhookRepository {
         signature: Option<&str>,
         transaction_id: Option<Uuid>,
     ) -> Result<WebhookEvent, DatabaseError> {
-        sqlx::query_as::<_, WebhookEvent>(
+        let inserted = sqlx::query_as::<_, WebhookEvent>(
             "INSERT INTO webhook_events (event_id, provider, event_type, payload, signature, transaction_id, status) 
              VALUES ($1, $2, $3, $4, $5, $6, 'pending') 
+             ON CONFLICT (provider, event_id) DO NOTHING
              RETURNING id, event_id, provider, event_type, payload, signature, status, transaction_id, processed_at, retry_count, error_message, created_at, updated_at",
         )
         .bind(event_id)
@@ -53,6 +54,21 @@ impl WebhookRepository {
         .bind(payload)
         .bind(signature)
         .bind(transaction_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)?;
+
+        if let Some(event) = inserted {
+            return Ok(event);
+        }
+
+        sqlx::query_as::<_, WebhookEvent>(
+            "SELECT id, event_id, provider, event_type, payload, signature, status, transaction_id, processed_at, retry_count, error_message, created_at, updated_at 
+             FROM webhook_events 
+             WHERE provider = $1 AND event_id = $2",
+        )
+        .bind(provider)
+        .bind(event_id)
         .fetch_one(&self.pool)
         .await
         .map_err(DatabaseError::from_sqlx)
@@ -68,6 +84,20 @@ impl WebhookRepository {
         )
         .bind(limit)
         .fetch_all(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)
+    }
+
+    /// Mark webhook event as processing
+    pub async fn mark_processing(&self, id: Uuid) -> Result<WebhookEvent, DatabaseError> {
+        sqlx::query_as::<_, WebhookEvent>(
+            "UPDATE webhook_events 
+             SET status = 'processing' 
+             WHERE id = $1 AND status = 'pending'
+             RETURNING id, event_id, provider, event_type, payload, signature, status, transaction_id, processed_at, retry_count, error_message, created_at, updated_at",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
         .await
         .map_err(DatabaseError::from_sqlx)
     }
@@ -92,7 +122,10 @@ impl WebhookRepository {
     ) -> Result<WebhookEvent, DatabaseError> {
         sqlx::query_as::<_, WebhookEvent>(
             "UPDATE webhook_events 
-             SET retry_count = retry_count + 1, error_message = $2, status = CASE WHEN retry_count + 1 >= 5 THEN 'failed' ELSE 'pending' END 
+             SET retry_count = retry_count + 1, 
+                 error_message = $2, 
+                 status = CASE WHEN retry_count + 1 >= 5 THEN 'failed' ELSE 'pending' END,
+                 processed_at = CASE WHEN retry_count + 1 >= 5 THEN NOW() ELSE processed_at END
              WHERE id = $1 
              RETURNING id, event_id, provider, event_type, payload, signature, status, transaction_id, processed_at, retry_count, error_message, created_at, updated_at",
         )

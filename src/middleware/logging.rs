@@ -39,6 +39,9 @@ impl MakeRequestId for UuidRequestId {
 /// - Response status code and processing duration
 /// - Slow requests (> 200ms) at WARN level
 /// - Request ID for correlation
+/// - Client IP address
+/// - Query parameters
+/// - User agent
 ///
 /// # Example Usage with Axum
 /// ```no_run
@@ -76,6 +79,19 @@ pub async fn request_logging_middleware(
         .map(|p| p.as_str().to_string())
         .unwrap_or_else(|| uri.path().to_string());
 
+    // Get query string
+    let query = uri.query().unwrap_or("");
+
+    // Get client IP
+    let client_ip = extract_client_ip(&request).unwrap_or_else(|| "unknown".to_string());
+
+    // Get user agent
+    let user_agent = request
+        .headers()
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown");
+
     // Get request ID from headers or extensions
     let request_id = request
         .headers()
@@ -90,12 +106,15 @@ pub async fn request_logging_middleware(
         })
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-    // Log request
+    // Log incoming request with full details
     info!(
         request_id = %request_id,
         method = %method,
         path = %path,
-        "Request started"
+        query = %query,
+        client_ip = %client_ip,
+        user_agent = %user_agent,
+        "📥 Incoming request"
     );
 
     // Process request in a span for correlation
@@ -105,6 +124,7 @@ pub async fn request_logging_middleware(
             request_id = %request_id,
             method = %method,
             path = %path,
+            client_ip = %client_ip,
         );
 
         async move { next.run(request).await }
@@ -116,16 +136,18 @@ pub async fn request_logging_middleware(
     let duration_ms = duration.as_millis();
     let status = response.status();
 
-    // Log response with appropriate level
+    // Log response with appropriate level and emoji indicators
     if duration_ms > 200 {
         // Slow request warning
         warn!(
             request_id = %request_id,
             method = %method,
             path = %path,
+            query = %query,
+            client_ip = %client_ip,
             status = %status.as_u16(),
             duration_ms = %duration_ms,
-            "Slow request completed"
+            "🐌 Slow request completed"
         );
     } else if status.is_server_error() {
         // Server errors at ERROR level
@@ -133,9 +155,11 @@ pub async fn request_logging_middleware(
             request_id = %request_id,
             method = %method,
             path = %path,
+            query = %query,
+            client_ip = %client_ip,
             status = %status.as_u16(),
             duration_ms = %duration_ms,
-            "Request failed with server error"
+            "❌ Request failed with server error"
         );
     } else if status.is_client_error() {
         // Client errors at WARN level
@@ -143,9 +167,11 @@ pub async fn request_logging_middleware(
             request_id = %request_id,
             method = %method,
             path = %path,
+            query = %query,
+            client_ip = %client_ip,
             status = %status.as_u16(),
             duration_ms = %duration_ms,
-            "Request completed with client error"
+            "⚠️  Request completed with client error"
         );
     } else {
         // Successful requests at INFO level
@@ -153,9 +179,11 @@ pub async fn request_logging_middleware(
             request_id = %request_id,
             method = %method,
             path = %path,
+            query = %query,
+            client_ip = %client_ip,
             status = %status.as_u16(),
             duration_ms = %duration_ms,
-            "Request completed"
+            "✅ Request completed successfully"
         );
     };
 
@@ -184,6 +212,9 @@ pub fn extract_client_ip(request: &Request) -> Option<String> {
         }
     }
 
+    // Try to get from connection info extension
+    // Note: This requires the ConnectInfo extension to be set by the server
+    // For local development, this will typically be 127.0.0.1
     None
 }
 

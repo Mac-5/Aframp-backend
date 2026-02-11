@@ -73,10 +73,8 @@ impl Environment {
 pub fn init_tracing() {
     let environment = Environment::from_env();
 
-    // Determine log format (JSON for production, pretty for dev)
-    let use_json = env::var("LOG_FORMAT")
-        .map(|f| f.to_lowercase() == "json")
-        .unwrap_or_else(|_| environment.is_production());
+    // JSON-only logging to ensure structured output in all environments
+    let use_json = true;
 
     // Build the environment filter
     let env_filter = EnvFilter::try_from_default_env()

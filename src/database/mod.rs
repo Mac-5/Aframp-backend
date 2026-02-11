@@ -1,12 +1,15 @@
 // This module requires std library (not available in WASM)
 
 pub mod bill_payment_repository;
+pub mod conversion_audit_repository;
 pub mod error;
 pub mod exchange_rate_repository;
+pub mod fee_structure_repository;
 pub mod payment_repository;
 pub mod repository;
 pub mod transaction;
 pub mod transaction_repository;
+pub mod trustline_operation_repository;
 pub mod trustline_repository;
 pub mod wallet_repository;
 pub mod webhook_repository;
@@ -17,6 +20,7 @@ use std::time::Duration;
 use tracing::{error as log_error, info, warn};
 
 use self::error::DatabaseError;
+use crate::config::DatabaseConfig;
 
 /// Database pool configuration
 #[derive(Debug, Clone)]
@@ -96,6 +100,19 @@ pub fn get_pool_stats(pool: &PgPool) -> PoolStats {
         num_idle: pool.num_idle() as u32,
         size: pool.size(),
     }
+}
+
+/// Initialize the database pool from application configuration
+pub async fn init_pool_from_config(config: &DatabaseConfig) -> Result<PgPool, DatabaseError> {
+    let pool_config = PoolConfig {
+        max_connections: config.max_connections,
+        min_connections: config.min_connections,
+        connection_timeout: Duration::from_secs(config.connection_timeout),
+        idle_timeout: Duration::from_secs(config.idle_timeout.unwrap_or(600)),
+        max_lifetime: Duration::from_secs(1800),
+    };
+
+    init_pool(&config.url, Some(pool_config)).await
 }
 
 #[cfg(test)]

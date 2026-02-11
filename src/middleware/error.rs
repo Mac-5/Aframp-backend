@@ -212,6 +212,27 @@ pub fn get_request_id_from_headers(headers: &axum::http::HeaderMap) -> Option<St
         .map(|s| s.to_string())
 }
 
+/// Build a standardized JSON error response for handlers that return StatusCode + message.
+#[cfg(feature = "database")]
+pub fn json_error_response(
+    status: StatusCode,
+    message: impl Into<String>,
+    request_id: Option<String>,
+) -> (StatusCode, Json<ErrorResponse>) {
+    let message = message.into();
+    let error_response = match status.as_u16() {
+        400..=499 => ErrorResponse::validation_error(
+            request_id,
+            "request",
+            &message,
+        )
+        .with_details(serde_json::json!({ "message": message })),
+        _ => ErrorResponse::internal_error(request_id),
+    };
+
+    (status, Json(error_response))
+}
+
 #[cfg(all(test, feature = "database"))]
 mod tests {
     use super::*;

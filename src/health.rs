@@ -86,13 +86,17 @@ impl ComponentHealth {
 /// Health checker for the application
 #[derive(Clone)]
 pub struct HealthChecker {
-    db_pool: sqlx::PgPool,
-    cache: RedisCache,
-    stellar_client: StellarClient,
+    db_pool: Option<sqlx::PgPool>,
+    cache: Option<RedisCache>,
+    stellar_client: Option<StellarClient>,
 }
 
 impl HealthChecker {
-    pub fn new(db_pool: sqlx::PgPool, cache: RedisCache, stellar_client: StellarClient) -> Self {
+    pub fn new(
+        db_pool: Option<sqlx::PgPool>,
+        cache: Option<RedisCache>,
+        stellar_client: Option<StellarClient>,
+    ) -> Self {
         Self {
             db_pool,
             cache,
@@ -104,102 +108,126 @@ impl HealthChecker {
     pub async fn check_health(&self) -> HealthStatus {
         let mut health_status = HealthStatus::new();
         let mut overall_healthy = true;
+        let mut any_disabled = false;
 
         // Check database health
-        match timeout(Duration::from_secs(5), check_database_health(&self.db_pool)).await {
-            Ok(db_result) => match db_result {
-                Ok(response_time) => {
-                    health_status.checks.insert(
-                        "database".to_string(),
-                        ComponentHealth::up(Some(response_time)),
-                    );
-                    info!("Database health check: OK ({}ms)", response_time);
-                }
-                Err(e) => {
+        if let Some(db_pool) = &self.db_pool {
+            match timeout(Duration::from_secs(5), check_database_health(db_pool)).await {
+                Ok(db_result) => match db_result {
+                    Ok(response_time) => {
+                        health_status.checks.insert(
+                            "database".to_string(),
+                            ComponentHealth::up(Some(response_time)),
+                        );
+                        info!("Database health check: OK ({}ms)", response_time);
+                    }
+                    Err(e) => {
+                        overall_healthy = false;
+                        health_status.checks.insert(
+                            "database".to_string(),
+                            ComponentHealth::down(Some(e.to_string())),
+                        );
+                        error!("Database health check failed: {}", e);
+                    }
+                },
+                Err(_) => {
                     overall_healthy = false;
                     health_status.checks.insert(
                         "database".to_string(),
-                        ComponentHealth::down(Some(e.to_string())),
+                        ComponentHealth::down(Some("Timeout".to_string())),
                     );
-                    error!("Database health check failed: {}", e);
+                    error!("Database health check timed out");
                 }
-            },
-            Err(_) => {
-                overall_healthy = false;
-                health_status.checks.insert(
-                    "database".to_string(),
-                    ComponentHealth::down(Some("Timeout".to_string())),
-                );
-                error!("Database health check timed out");
             }
+        } else {
+            any_disabled = true;
+            health_status.checks.insert(
+                "database".to_string(),
+                ComponentHealth::warning(None, Some("Disabled by configuration".to_string())),
+            );
         }
 
         // Check cache health
-        match timeout(Duration::from_secs(5), check_cache_health(&self.cache)).await {
-            Ok(cache_result) => match cache_result {
-                Ok(response_time) => {
-                    health_status.checks.insert(
-                        "cache".to_string(),
-                        ComponentHealth::up(Some(response_time)),
-                    );
-                    info!("Cache health check: OK ({}ms)", response_time);
-                }
-                Err(e) => {
+        if let Some(cache) = &self.cache {
+            match timeout(Duration::from_secs(5), check_cache_health(cache)).await {
+                Ok(cache_result) => match cache_result {
+                    Ok(response_time) => {
+                        health_status.checks.insert(
+                            "cache".to_string(),
+                            ComponentHealth::up(Some(response_time)),
+                        );
+                        info!("Cache health check: OK ({}ms)", response_time);
+                    }
+                    Err(e) => {
+                        overall_healthy = false;
+                        health_status.checks.insert(
+                            "cache".to_string(),
+                            ComponentHealth::down(Some(e.to_string())),
+                        );
+                        error!("Cache health check failed: {}", e);
+                    }
+                },
+                Err(_) => {
                     overall_healthy = false;
                     health_status.checks.insert(
                         "cache".to_string(),
-                        ComponentHealth::down(Some(e.to_string())),
+                        ComponentHealth::down(Some("Timeout".to_string())),
                     );
-                    error!("Cache health check failed: {}", e);
+                    error!("Cache health check timed out");
                 }
-            },
-            Err(_) => {
-                overall_healthy = false;
-                health_status.checks.insert(
-                    "cache".to_string(),
-                    ComponentHealth::down(Some("Timeout".to_string())),
-                );
-                error!("Cache health check timed out");
             }
+        } else {
+            any_disabled = true;
+            health_status.checks.insert(
+                "cache".to_string(),
+                ComponentHealth::warning(None, Some("Disabled by configuration".to_string())),
+            );
         }
 
         // Check Stellar health
-        match timeout(
-            Duration::from_secs(10),
-            check_stellar_health(&self.stellar_client),
-        )
-        .await
-        {
-            Ok(stellar_result) => match stellar_result {
-                Ok(response_time) => {
-                    health_status.checks.insert(
-                        "stellar".to_string(),
-                        ComponentHealth::up(Some(response_time)),
-                    );
-                    info!("Stellar health check: OK ({}ms)", response_time);
-                }
-                Err(e) => {
+        if let Some(stellar_client) = &self.stellar_client {
+            match timeout(Duration::from_secs(10), check_stellar_health(stellar_client)).await {
+                Ok(stellar_result) => match stellar_result {
+                    Ok(response_time) => {
+                        health_status.checks.insert(
+                            "stellar".to_string(),
+                            ComponentHealth::up(Some(response_time)),
+                        );
+                        info!("Stellar health check: OK ({}ms)", response_time);
+                    }
+                    Err(e) => {
+                        overall_healthy = false;
+                        health_status.checks.insert(
+                            "stellar".to_string(),
+                            ComponentHealth::down(Some(e.to_string())),
+                        );
+                        error!("Stellar health check failed: {}", e);
+                    }
+                },
+                Err(_) => {
                     overall_healthy = false;
                     health_status.checks.insert(
                         "stellar".to_string(),
-                        ComponentHealth::down(Some(e.to_string())),
+                        ComponentHealth::down(Some("Timeout".to_string())),
                     );
-                    error!("Stellar health check failed: {}", e);
+                    error!("Stellar health check timed out");
                 }
-            },
-            Err(_) => {
-                overall_healthy = false;
-                health_status.checks.insert(
-                    "stellar".to_string(),
-                    ComponentHealth::down(Some("Timeout".to_string())),
-                );
-                error!("Stellar health check timed out");
             }
+        } else {
+            any_disabled = true;
+            health_status.checks.insert(
+                "stellar".to_string(),
+                ComponentHealth::warning(None, Some("Disabled by configuration".to_string())),
+            );
         }
 
         // Set overall status
         health_status.status = if overall_healthy {
-            HealthState::Healthy
+            if any_disabled {
+                HealthState::Degraded
+            } else {
+                HealthState::Healthy
+            }
         } else {
             HealthState::Unhealthy
         };
@@ -245,10 +273,6 @@ pub async fn check_cache_health(
 pub async fn check_stellar_health(
     stellar_client: &crate::chains::stellar::client::StellarClient,
 ) -> Result<u128, Box<dyn std::error::Error + Send + Sync>> {
-    use std::time::Instant;
-
-    let start = Instant::now();
-
     // Try to perform a simple operation to check Stellar connectivity
     match stellar_client.health_check().await {
         Ok(status) => {

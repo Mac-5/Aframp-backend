@@ -33,6 +33,11 @@ pub trait Repository: Send + Sync {
     }
 }
 
+/// Repository error handling guidance:
+/// - Map SQLx errors via DatabaseError::from_sqlx
+/// - Add context with DatabaseError::with_context where useful
+/// - Use explicit NotFound errors for missing required records
+
 /// Trait for repositories that support transactions
 #[async_trait]
 pub trait TransactionalRepository: Repository {
