@@ -4,17 +4,63 @@ mod tests {
     use crate::chains::stellar::{
         client::StellarClient,
         config::{StellarConfig, StellarNetwork},
-        types::is_valid_stellar_address,
+        types::{extract_asset_balance, is_valid_stellar_address, AssetBalance},
     };
     use std::time::Duration;
+    use stellar_strkey::ed25519::PublicKey as StrkeyPublicKey;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
 
     fn test_config() -> StellarConfig {
         StellarConfig {
             network: StellarNetwork::Testnet,
-            request_timeout: Duration::from_secs(15),
+            horizon_url_override: None,
+            request_timeout: Duration::from_secs(10),
             max_retries: 3,
             health_check_interval: Duration::from_secs(30),
         }
+    }
+
+    async fn spawn_single_response_server(
+        status_code: u16,
+        body: &'static str,
+    ) -> (String, oneshot::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind test listener");
+        let addr = listener.local_addr().expect("failed to read listener addr");
+        let (request_line_tx, request_line_rx) = oneshot::channel::<String>();
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept failed");
+            let mut buf = vec![0_u8; 8192];
+            let n = socket.read(&mut buf).await.expect("failed to read request");
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let first_line = req.lines().next().unwrap_or_default().to_string();
+            let _ = request_line_tx.send(first_line);
+
+            let reason = match status_code {
+                200 => "OK",
+                404 => "Not Found",
+                429 => "Too Many Requests",
+                _ => "Internal Server Error",
+            };
+            let response = format!(
+                "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                status_code,
+                reason,
+                body.len(),
+                body
+            );
+
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("failed to write response");
+        });
+
+        (format!("http://{}", addr), request_line_rx)
     }
 
     // Valid testnet account that exists (from Stellar friendbot)
@@ -68,13 +114,20 @@ mod tests {
         let config = test_config();
         let client = StellarClient::new(config).expect("Failed to create client");
 
-        // Use a valid format but nonexistent address
-        let nonexistent_address = "GAAAAAAAACGC6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        // Valid StrKey generated from unlikely-to-exist raw ed25519 bytes.
+        let nonexistent_address = StrkeyPublicKey([0u8; 32]).to_string();
 
-        let result = client.get_account(nonexistent_address).await;
-        // This test verifies we get an error for nonexistent accounts
-        // Accept any error type since the API may return different errors
-        assert!(result.is_err(), "Expected an error for nonexistent account");
+        let result = client.get_account(nonexistent_address.as_str()).await;
+        assert!(
+            matches!(
+                result,
+                Err(StellarError::AccountNotFound { .. })
+                    | Err(StellarError::NetworkError { .. })
+                    | Err(StellarError::TimeoutError { .. })
+            ),
+            "Expected AccountNotFound or transport error for nonexistent account, got: {:?}",
+            result
+        );
     }
 
     #[tokio::test]
@@ -219,5 +272,194 @@ mod tests {
             mainnet_config.network.network_passphrase(),
             "Public Global Stellar Network ; September 2015"
         );
+    }
+
+    #[test]
+    fn test_extract_cngn_balance_by_issuer() {
+        let issuer_a = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+        let issuer_b = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+        let balances = vec![
+            AssetBalance {
+                asset_type: "native".to_string(),
+                asset_code: None,
+                asset_issuer: None,
+                balance: "10.0000000".to_string(),
+                limit: None,
+                is_authorized: true,
+                is_authorized_to_maintain_liabilities: true,
+                last_modified_ledger: None,
+            },
+            AssetBalance {
+                asset_type: "credit_alphanum4".to_string(),
+                asset_code: Some("cNGN".to_string()),
+                asset_issuer: Some(issuer_a.to_string()),
+                balance: "50.0000000".to_string(),
+                limit: None,
+                is_authorized: true,
+                is_authorized_to_maintain_liabilities: true,
+                last_modified_ledger: None,
+            },
+            AssetBalance {
+                asset_type: "credit_alphanum4".to_string(),
+                asset_code: Some("CNGN".to_string()),
+                asset_issuer: Some(issuer_b.to_string()),
+                balance: "75.0000000".to_string(),
+                limit: None,
+                is_authorized: true,
+                is_authorized_to_maintain_liabilities: true,
+                last_modified_ledger: None,
+            },
+        ];
+
+        let issuer_specific =
+            extract_asset_balance(&balances, "cNGN", Some(issuer_a)).expect("missing issuer A");
+        assert_eq!(issuer_specific, "50.0000000");
+
+        let any_issuer = extract_asset_balance(&balances, "cngn", None).expect("missing cNGN");
+        assert_eq!(any_issuer, "50.0000000");
+    }
+
+    #[tokio::test]
+    async fn test_health_check_unreachable_horizon() {
+        let mut config = test_config();
+        config.horizon_url_override = Some("http://127.0.0.1:1".to_string());
+        config.request_timeout = Duration::from_secs(2);
+
+        let client = StellarClient::new(config).expect("Failed to create client");
+        let health = client.health_check().await.expect("health check should not crash");
+
+        assert!(!health.is_healthy);
+        assert!(health.error_message.is_some());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires local TCP listener access for mocked Horizon responses"]
+    async fn test_get_transaction_by_hash_mocked_success() {
+        let (base_url, request_line_rx) = spawn_single_response_server(
+            200,
+            r#"{
+                "hash": "tx_hash_1",
+                "successful": true,
+                "ledger": 12345,
+                "paging_token": "98765",
+                "memo_type": "text",
+                "memo": "tx-1"
+            }"#,
+        )
+        .await;
+
+        let mut config = test_config();
+        config.horizon_url_override = Some(base_url);
+        let client = StellarClient::new(config).expect("Failed to create client");
+
+        let tx = client
+            .get_transaction_by_hash("tx_hash_1")
+            .await
+            .expect("expected mocked transaction");
+        let request_line = request_line_rx.await.expect("missing request line");
+
+        assert_eq!(tx.hash, "tx_hash_1");
+        assert!(tx.successful);
+        assert_eq!(tx.ledger, Some(12345));
+        assert_eq!(tx.memo.as_deref(), Some("tx-1"));
+        assert!(request_line.contains("GET /transactions/tx_hash_1 "));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires local TCP listener access for mocked Horizon responses"]
+    async fn test_get_transaction_by_hash_mocked_not_found() {
+        let (base_url, request_line_rx) =
+            spawn_single_response_server(404, r#"{"status":404,"title":"Not Found"}"#).await;
+
+        let mut config = test_config();
+        config.horizon_url_override = Some(base_url);
+        let client = StellarClient::new(config).expect("Failed to create client");
+
+        let result = client.get_transaction_by_hash("missing_hash").await;
+        let request_line = request_line_rx.await.expect("missing request line");
+        assert!(matches!(result, Err(StellarError::TransactionFailed { .. })));
+        assert!(request_line.contains("GET /transactions/missing_hash "));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires local TCP listener access for mocked Horizon responses"]
+    async fn test_list_account_transactions_mocked_success() {
+        let (base_url, request_line_rx) = spawn_single_response_server(
+            200,
+            r#"{
+                "_embedded": {
+                    "records": [
+                        {
+                            "hash": "tx_hash_2",
+                            "successful": true,
+                            "ledger": 555,
+                            "paging_token": "cursor_1",
+                            "memo_type": "text",
+                            "memo": "tx-2"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .await;
+
+        let mut config = test_config();
+        config.horizon_url_override = Some(base_url);
+        let client = StellarClient::new(config).expect("Failed to create client");
+
+        let page = client
+            .list_account_transactions(TEST_ADDRESS, 10, None)
+            .await
+            .expect("expected mocked account tx page");
+        let request_line = request_line_rx.await.expect("missing request line");
+
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(page.records[0].hash, "tx_hash_2");
+        assert_eq!(page.records[0].memo.as_deref(), Some("tx-2"));
+        assert!(request_line.contains(&format!(
+            "GET /accounts/{}/transactions?order=asc&limit=10 ",
+            TEST_ADDRESS
+        )));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires local TCP listener access for mocked Horizon responses"]
+    async fn test_get_transaction_operations_mocked_success() {
+        let (base_url, request_line_rx) = spawn_single_response_server(
+            200,
+            r#"{
+                "_embedded": {
+                    "records": [
+                        {
+                            "type": "payment",
+                            "to": "GCJRI5CIWK5IU67Q6DGA7QW52JDKRO7JEAHQKFNDUJUPEZGURDBX3LDX",
+                            "asset_code": "cNGN",
+                            "asset_issuer": "GISSUERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .await;
+
+        let mut config = test_config();
+        config.horizon_url_override = Some(base_url);
+        let client = StellarClient::new(config).expect("Failed to create client");
+
+        let operations = client
+            .get_transaction_operations("tx_hash_3")
+            .await
+            .expect("expected mocked operations");
+        let request_line = request_line_rx.await.expect("missing request line");
+
+        assert_eq!(operations.len(), 1);
+        assert_eq!(
+            operations[0].get("type").and_then(|v| v.as_str()),
+            Some("payment")
+        );
+        assert!(request_line.contains(
+            "GET /transactions/tx_hash_3/operations?limit=200 "
+        ));
     }
 }

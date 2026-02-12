@@ -1,106 +1,238 @@
-//! Payment provider types and data structures
-//!
-//! Common types used across all payment providers for requests and responses.
-
+use crate::payments::error::PaymentError;
+use bigdecimal::BigDecimal;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::str::FromStr;
 
-/// Payment request for initiating a transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaymentRequest {
-    /// Customer email address
-    pub email: String,
-    /// Amount in smallest currency unit (e.g., kobo for NGN, pesewas for GHS)
-    pub amount: String,
-    /// Currency code (NGN, GHS, ZAR, etc.)
-    pub currency: String,
-    /// Unique reference for this transaction (for idempotency)
-    pub reference: String,
-    /// Callback URL to redirect after payment
-    pub callback_url: Option<String>,
-    /// Payment channels to enable (card, bank, ussd, etc.)
-    pub channels: Option<Vec<String>>,
-    /// Additional metadata
-    pub metadata: Option<serde_json::Value>,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderName {
+    Paystack,
+    Flutterwave,
+    Mpesa,
 }
 
-/// Payment response from provider
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaymentResponse {
-    /// Authorization URL for redirect-based payments
-    pub authorization_url: Option<String>,
-    /// Access code for inline payment forms
-    pub access_code: Option<String>,
-    /// Transaction reference
-    pub reference: String,
-    /// Provider-specific response data
-    pub provider_data: Option<serde_json::Value>,
+impl ProviderName {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProviderName::Paystack => "paystack",
+            ProviderName::Flutterwave => "flutterwave",
+            ProviderName::Mpesa => "mpesa",
+        }
+    }
 }
 
-/// Payment status information
+impl std::fmt::Display for ProviderName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for ProviderName {
+    type Err = PaymentError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_lowercase().as_str() {
+            "paystack" => Ok(ProviderName::Paystack),
+            "flutterwave" => Ok(ProviderName::Flutterwave),
+            "mpesa" | "m-pesa" => Ok(ProviderName::Mpesa),
+            _ => Err(PaymentError::ValidationError {
+                message: format!("unsupported provider: {}", value),
+                field: Some("provider".to_string()),
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PaymentStatus {
-    /// Payment was successful
-    Success {
-        amount: String,
-        currency: String,
-        paid_at: Option<String>,
-        channel: Option<String>,
-    },
-    /// Payment is pending
+pub struct Money {
+    pub amount: String,
+    pub currency: String,
+}
+
+impl Money {
+    pub fn validate_positive(&self, field: &str) -> Result<(), PaymentError> {
+        let parsed = BigDecimal::from_str(&self.amount).map_err(|_| PaymentError::ValidationError {
+            message: format!("invalid decimal amount: {}", self.amount),
+            field: Some(field.to_string()),
+        })?;
+        if parsed <= BigDecimal::from(0) {
+            return Err(PaymentError::ValidationError {
+                message: "amount must be greater than zero".to_string(),
+                field: Some(field.to_string()),
+            });
+        }
+        if self.currency.trim().is_empty() {
+            return Err(PaymentError::ValidationError {
+                message: "currency is required".to_string(),
+                field: Some("currency".to_string()),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentMethod {
+    Card,
+    BankTransfer,
+    MobileMoney,
+    Ussd,
+    Wallet,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WithdrawalMethod {
+    BankTransfer,
+    MobileMoney,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentState {
     Pending,
-    /// Payment failed
-    Failed {
-        reason: Option<String>,
-    },
-    /// Payment was reversed/refunded
+    Processing,
+    Success,
+    Failed,
+    Cancelled,
     Reversed,
-    /// Unknown status
     Unknown,
 }
 
-/// Withdrawal request for transferring funds
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomerContact {
+    pub email: Option<String>,
+    pub phone: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WithdrawalRecipient {
+    pub account_name: Option<String>,
+    pub account_number: Option<String>,
+    pub bank_code: Option<String>,
+    pub phone_number: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymentRequest {
+    pub amount: Money,
+    pub customer: CustomerContact,
+    pub payment_method: PaymentMethod,
+    pub callback_url: Option<String>,
+    pub transaction_reference: String,
+    pub metadata: Option<JsonValue>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WithdrawalRequest {
-    /// Recipient name
-    pub recipient_name: String,
-    /// Bank account number
-    pub account_number: String,
-    /// Bank code (provider-specific)
-    pub bank_code: String,
-    /// Amount in smallest currency unit
-    pub amount: String,
-    /// Currency code
-    pub currency: String,
-    /// Unique reference for this withdrawal
-    pub reference: String,
-    /// Reason/description for withdrawal
+    pub amount: Money,
+    pub recipient: WithdrawalRecipient,
+    pub withdrawal_method: WithdrawalMethod,
+    pub transaction_reference: String,
     pub reason: Option<String>,
-    /// Additional metadata
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<JsonValue>,
 }
 
-/// Withdrawal response from provider
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusRequest {
+    pub transaction_reference: Option<String>,
+    pub provider_reference: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymentResponse {
+    pub status: PaymentState,
+    pub transaction_reference: String,
+    pub provider_reference: Option<String>,
+    pub payment_url: Option<String>,
+    pub amount_charged: Option<Money>,
+    pub fees_charged: Option<Money>,
+    pub provider_data: Option<JsonValue>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WithdrawalResponse {
-    /// Transfer reference
-    pub transfer_reference: String,
-    /// Transfer status
-    pub status: WithdrawalStatus,
-    /// Provider-specific response data
-    pub provider_data: Option<serde_json::Value>,
+    pub status: PaymentState,
+    pub transaction_reference: String,
+    pub provider_reference: Option<String>,
+    pub amount_debited: Option<Money>,
+    pub fees_charged: Option<Money>,
+    pub estimated_completion_seconds: Option<u64>,
+    pub provider_data: Option<JsonValue>,
 }
 
-/// Withdrawal status
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum WithdrawalStatus {
-    /// Transfer is pending
-    Pending,
-    /// Transfer was successful
-    Success,
-    /// Transfer failed
-    Failed {
-        reason: Option<String>,
-    },
-    /// Transfer was reversed
-    Reversed,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusResponse {
+    pub status: PaymentState,
+    pub transaction_reference: Option<String>,
+    pub provider_reference: Option<String>,
+    pub amount: Option<Money>,
+    pub payment_method: Option<PaymentMethod>,
+    pub timestamp: Option<String>,
+    pub failure_reason: Option<String>,
+    pub provider_data: Option<JsonValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookVerificationResult {
+    pub valid: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookEvent {
+    pub provider: ProviderName,
+    pub event_type: String,
+    pub transaction_reference: Option<String>,
+    pub provider_reference: Option<String>,
+    pub status: Option<PaymentState>,
+    pub payload: JsonValue,
+    pub received_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payment_request_serializes_to_json() {
+        let request = PaymentRequest {
+            amount: Money {
+                amount: "1000.00".to_string(),
+                currency: "NGN".to_string(),
+            },
+            customer: CustomerContact {
+                email: Some("user@example.com".to_string()),
+                phone: Some("+2348012345678".to_string()),
+            },
+            payment_method: PaymentMethod::Card,
+            callback_url: Some("https://example.com/callback".to_string()),
+            transaction_reference: "txn_ref_1".to_string(),
+            metadata: Some(serde_json::json!({"user_id":"u1"})),
+        };
+        let json = serde_json::to_value(&request).expect("serialization should succeed");
+        assert_eq!(json["amount"]["currency"], "NGN");
+        assert_eq!(json["transaction_reference"], "txn_ref_1");
+    }
+
+    #[test]
+    fn status_response_deserializes_from_json() {
+        let payload = serde_json::json!({
+            "status": "success",
+            "transaction_reference": "txn_ref_1",
+            "provider_reference": "ps_ref_1",
+            "amount": {"amount":"1000.00","currency":"NGN"},
+            "payment_method": "card",
+            "timestamp": "2026-02-12T00:00:00Z",
+            "failure_reason": null,
+            "provider_data": {"key":"value"}
+        });
+        let parsed: StatusResponse =
+            serde_json::from_value(payload).expect("deserialization should succeed");
+        assert_eq!(parsed.status, PaymentState::Success);
+        assert_eq!(parsed.provider_reference.as_deref(), Some("ps_ref_1"));
+    }
 }

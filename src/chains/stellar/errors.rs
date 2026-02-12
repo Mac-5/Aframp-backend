@@ -31,6 +31,18 @@ pub enum StellarError {
 
     #[error("Unexpected error: {message}")]
     UnexpectedError { message: String },
+
+    #[error("Insufficient XLM. Available: {available}, Required: {required}")]
+    InsufficientXlm { available: String, required: String },
+
+    #[error("Trustline already exists for account {address} and asset {asset}")]
+    TrustlineAlreadyExists { address: String, asset: String },
+
+    #[error("Transaction failed: {message}")]
+    TransactionFailed { message: String },
+
+    #[error("Signing error: {message}")]
+    SigningError { message: String },
 }
 
 #[allow(dead_code)]
@@ -77,6 +89,35 @@ impl StellarError {
 
     pub fn unexpected_error(message: impl Into<String>) -> Self {
         Self::UnexpectedError {
+            message: message.into(),
+        }
+    }
+
+    pub fn insufficient_xlm(available: impl Into<String>, required: impl Into<String>) -> Self {
+        Self::InsufficientXlm {
+            available: available.into(),
+            required: required.into(),
+        }
+    }
+
+    pub fn trustline_already_exists(
+        address: impl Into<String>,
+        asset: impl Into<String>,
+    ) -> Self {
+        Self::TrustlineAlreadyExists {
+            address: address.into(),
+            asset: asset.into(),
+        }
+    }
+
+    pub fn transaction_failed(message: impl Into<String>) -> Self {
+        Self::TransactionFailed {
+            message: message.into(),
+        }
+    }
+
+    pub fn signing_error(message: impl Into<String>) -> Self {
+        Self::SigningError {
             message: message.into(),
         }
     }

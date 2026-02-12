@@ -4,8 +4,25 @@
 //! to support fiat transactions in African markets.
 
 #[cfg(feature = "database")]
+pub mod error;
+#[cfg(feature = "database")]
+pub mod factory;
+#[cfg(feature = "database")]
+pub mod provider;
+#[cfg(feature = "database")]
 pub mod providers;
 #[cfg(feature = "database")]
 pub mod traits;
 #[cfg(feature = "database")]
 pub mod types;
+#[cfg(feature = "database")]
+pub mod utils;
+
+#[cfg(feature = "database")]
+pub use error::{PaymentError, PaymentResult};
+#[cfg(feature = "database")]
+pub use factory::PaymentProviderFactory;
+#[cfg(feature = "database")]
+pub use provider::PaymentProvider;
+#[cfg(feature = "database")]
+pub use types::*;

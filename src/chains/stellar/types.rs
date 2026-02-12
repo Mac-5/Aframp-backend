@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use stellar_strkey::ed25519::PublicKey as StrkeyPublicKey;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,22 +132,50 @@ impl From<HorizonBalance> for AssetBalance {
 }
 
 pub fn is_valid_stellar_address(address: &str) -> bool {
-    // Basic validation: Stellar addresses are 56 characters starting with 'G'
-    address.len() == 56
-        && address.starts_with('G')
-        && address.chars().all(|c| c.is_ascii_alphanumeric())
+    if address.len() != 56 || !address.starts_with('G') {
+        return false;
+    }
+
+    StrkeyPublicKey::from_string(address).is_ok()
+}
+
+pub fn extract_asset_balance(
+    balances: &[AssetBalance],
+    asset_code: &str,
+    asset_issuer: Option<&str>,
+) -> Option<String> {
+    balances
+        .iter()
+        .find(|balance| {
+            if !matches!(balance.asset_type.as_str(), "credit_alphanum4" | "credit_alphanum12") {
+                return false;
+            }
+
+            let code_matches = balance
+                .asset_code
+                .as_deref()
+                .is_some_and(|code| code.eq_ignore_ascii_case(asset_code));
+            if !code_matches {
+                return false;
+            }
+
+            match asset_issuer {
+                Some(issuer) => balance
+                    .asset_issuer
+                    .as_deref()
+                    .is_some_and(|candidate| candidate == issuer),
+                None => true,
+            }
+        })
+        .map(|balance| balance.balance.clone())
 }
 
 #[allow(dead_code)]
 pub fn extract_afri_balance(balances: &[AssetBalance]) -> Option<String> {
-    balances
-        .iter()
-        .find(|balance| {
-            balance.asset_type == "credit_alphanum4"
-                && balance
-                    .asset_code
-                    .as_ref()
-                    .is_some_and(|code| code == "AFRI")
-        })
-        .map(|balance| balance.balance.clone())
+    extract_asset_balance(balances, "AFRI", None)
+}
+
+#[allow(dead_code)]
+pub fn extract_cngn_balance(balances: &[AssetBalance], issuer: Option<&str>) -> Option<String> {
+    extract_asset_balance(balances, "cNGN", issuer)
 }

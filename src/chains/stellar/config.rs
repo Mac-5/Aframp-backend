@@ -28,6 +28,7 @@ impl StellarNetwork {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StellarConfig {
     pub network: StellarNetwork,
+    pub horizon_url_override: Option<String>,
     pub request_timeout: Duration,
     pub max_retries: u32,
     pub health_check_interval: Duration,
@@ -37,7 +38,8 @@ impl Default for StellarConfig {
     fn default() -> Self {
         Self {
             network: StellarNetwork::Testnet,
-            request_timeout: Duration::from_secs(15),
+            horizon_url_override: None,
+            request_timeout: Duration::from_secs(10),
             max_retries: 3,
             health_check_interval: Duration::from_secs(30),
         }
@@ -70,9 +72,11 @@ impl StellarConfig {
             .and_then(|s| s.parse().ok())
             .map(Duration::from_secs)
             .unwrap_or_else(|| {
-                info!("Using default request timeout: 15 seconds");
-                Duration::from_secs(15)
+                info!("Using default request timeout: 10 seconds");
+                Duration::from_secs(10)
             });
+
+        let horizon_url_override = std::env::var("STELLAR_HORIZON_URL").ok();
 
         let max_retries = std::env::var("STELLAR_MAX_RETRIES")
             .ok()
@@ -90,6 +94,7 @@ impl StellarConfig {
 
         Ok(Self {
             network,
+            horizon_url_override,
             request_timeout,
             max_retries,
             health_check_interval,
@@ -101,6 +106,10 @@ impl StellarConfig {
             anyhow::bail!("Request timeout must be greater than 0");
         }
 
+        if self.request_timeout.as_secs() > 60 {
+            anyhow::bail!("Request timeout must be 60 seconds or less");
+        }
+
         if self.max_retries == 0 {
             anyhow::bail!("Max retries must be greater than 0");
         }
@@ -109,11 +118,29 @@ impl StellarConfig {
             anyhow::bail!("Health check interval must be greater than 0");
         }
 
+        if let Some(override_url) = &self.horizon_url_override {
+            let parsed = reqwest::Url::parse(override_url)
+                .map_err(|e| anyhow::anyhow!("Invalid STELLAR_HORIZON_URL: {}", e))?;
+            let scheme = parsed.scheme();
+            if scheme != "http" && scheme != "https" {
+                anyhow::bail!("STELLAR_HORIZON_URL must use http or https");
+            }
+        }
+
         info!(
-            "Stellar configuration validated - Network: {:?}, Timeout: {:?}, Max retries: {}",
-            self.network, self.request_timeout, self.max_retries
+            "Stellar configuration validated - Network: {:?}, Horizon URL: {}, Timeout: {:?}, Max retries: {}",
+            self.network,
+            self.horizon_url(),
+            self.request_timeout,
+            self.max_retries
         );
 
         Ok(())
+    }
+
+    pub fn horizon_url(&self) -> &str {
+        self.horizon_url_override
+            .as_deref()
+            .unwrap_or_else(|| self.network.horizon_url())
     }
 }

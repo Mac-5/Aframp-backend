@@ -1,6 +1,7 @@
 use crate::database::error::DatabaseError;
 use crate::database::repository::{Repository, TransactionalRepository};
 use async_trait::async_trait;
+use serde_json::Value as JsonValue;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -141,6 +142,48 @@ impl TransactionRepository {
                 .map_err(DatabaseError::from_sqlx)?;
 
         Ok(result)
+    }
+
+    /// Find pending/processing payment transactions for blockchain monitoring.
+    pub async fn find_pending_payments_for_monitoring(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<Transaction>, DatabaseError> {
+        sqlx::query_as::<_, Transaction>(
+            "SELECT id, wallet_id, transaction_type, amount, status, fiat_amount,
+                    exchange_rate, metadata, created_at, updated_at
+             FROM transactions
+             WHERE transaction_type = 'payment'
+               AND status IN ('pending', 'processing')
+             ORDER BY created_at ASC
+             LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)
+    }
+
+    /// Update transaction status and metadata atomically.
+    pub async fn update_status_with_metadata(
+        &self,
+        transaction_id: &str,
+        new_status: &str,
+        metadata: JsonValue,
+    ) -> Result<Transaction, DatabaseError> {
+        sqlx::query_as::<_, Transaction>(
+            "UPDATE transactions
+             SET status = $1, metadata = $2, updated_at = NOW()
+             WHERE id = $3
+             RETURNING id, wallet_id, transaction_type, amount, status, fiat_amount,
+                      exchange_rate, metadata, created_at, updated_at",
+        )
+        .bind(new_status)
+        .bind(metadata)
+        .bind(transaction_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(DatabaseError::from_sqlx)
     }
 }
 

@@ -11,6 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = StellarConfig {
         network: StellarNetwork::Testnet,
+        horizon_url_override: None,
         request_timeout: std::time::Duration::from_secs(10),
         max_retries: 3,
         health_check_interval: std::time::Duration::from_secs(30),

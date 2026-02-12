@@ -439,6 +439,23 @@ impl From<StellarError> for AppError {
                     is_retryable: true,
                 })
             }
+            SE::InsufficientXlm { available, required } => {
+                AppErrorKind::Domain(DomainError::InsufficientBalance {
+                    available,
+                    required,
+                })
+            }
+            SE::TrustlineAlreadyExists { address, asset } => {
+                AppErrorKind::Domain(DomainError::DuplicateTransaction {
+                    transaction_id: format!("trustline:{}:{}", address, asset),
+                })
+            }
+            SE::TransactionFailed { message } | SE::SigningError { message } => {
+                AppErrorKind::External(ExternalError::Blockchain {
+                    message,
+                    is_retryable: false,
+                })
+            }
             SE::ConfigError { message } => {
                 AppErrorKind::Infrastructure(InfrastructureError::Configuration { message })
             }

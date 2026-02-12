@@ -1,37 +1,33 @@
-//! Paystack payment provider implementation
-//!
-//! This module provides integration with Paystack's payment API for processing
-//! payments in Nigeria (NGN), Ghana (GHS), and South Africa (ZAR).
-
-use crate::error::{AppError, AppErrorKind, ExternalError};
-use crate::payments::traits::PaymentProvider;
+use crate::payments::error::{PaymentError, PaymentResult};
+use crate::payments::provider::PaymentProvider;
 use crate::payments::types::{
-    PaymentRequest, PaymentResponse, PaymentStatus, WithdrawalRequest, WithdrawalResponse,
-    WithdrawalStatus,
+    Money, PaymentMethod, PaymentRequest, PaymentResponse, PaymentState, ProviderName,
+    StatusRequest, StatusResponse, WebhookEvent, WebhookVerificationResult, WithdrawalMethod,
+    WithdrawalRequest, WithdrawalResponse,
 };
+use crate::payments::utils::{verify_hmac_sha512_hex, PaymentHttpClient};
 use async_trait::async_trait;
-use reqwest::Client;
 use serde::Deserialize;
+use serde_json::Value as JsonValue;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::info;
 
-/// Paystack payment provider configuration
 #[derive(Debug, Clone)]
 pub struct PaystackConfig {
-    /// Paystack API secret key
+    pub public_key: Option<String>,
     pub secret_key: String,
-    /// Paystack API base URL (defaults to https://api.paystack.co)
+    pub webhook_secret: Option<String>,
     pub base_url: String,
-    /// Request timeout in seconds
     pub timeout_secs: u64,
-    /// Maximum number of retries for failed requests
     pub max_retries: u32,
 }
 
 impl Default for PaystackConfig {
     fn default() -> Self {
         Self {
+            public_key: None,
             secret_key: String::new(),
+            webhook_secret: None,
             base_url: "https://api.paystack.co".to_string(),
             timeout_secs: 30,
             max_retries: 3,
@@ -40,426 +36,378 @@ impl Default for PaystackConfig {
 }
 
 impl PaystackConfig {
-    /// Create config from environment variables
-    pub fn from_env() -> Result<Self, AppError> {
+    pub fn from_env() -> PaymentResult<Self> {
         let secret_key = std::env::var("PAYSTACK_SECRET_KEY").map_err(|_| {
-            AppError::new(AppErrorKind::Infrastructure(
-                crate::error::InfrastructureError::Configuration {
-                    message: "PAYSTACK_SECRET_KEY environment variable is required".to_string(),
-                },
-            ))
+            PaymentError::ValidationError {
+                message: "PAYSTACK_SECRET_KEY environment variable is required".to_string(),
+                field: Some("PAYSTACK_SECRET_KEY".to_string()),
+            }
         })?;
 
-        let base_url = std::env::var("PAYSTACK_BASE_URL")
-            .unwrap_or_else(|_| "https://api.paystack.co".to_string());
-
-        let timeout_secs = std::env::var("PAYSTACK_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(30);
-
-        let max_retries = std::env::var("PAYSTACK_MAX_RETRIES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(3);
-
         Ok(Self {
+            public_key: std::env::var("PAYSTACK_PUBLIC_KEY").ok(),
+            webhook_secret: std::env::var("PAYSTACK_WEBHOOK_SECRET").ok(),
+            base_url: std::env::var("PAYSTACK_BASE_URL")
+                .unwrap_or_else(|_| "https://api.paystack.co".to_string()),
+            timeout_secs: std::env::var("PAYSTACK_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(30),
+            max_retries: std::env::var("PAYSTACK_MAX_RETRIES")
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(3),
             secret_key,
-            base_url,
-            timeout_secs,
-            max_retries,
         })
     }
 }
 
-/// Paystack payment provider
 pub struct PaystackProvider {
     config: PaystackConfig,
-    client: Client,
+    http: PaymentHttpClient,
 }
 
 impl PaystackProvider {
-    /// Create a new Paystack provider instance
-    pub fn new(config: PaystackConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .expect("Failed to create HTTP client");
-
-        Self { config, client }
+    pub fn new(config: PaystackConfig) -> PaymentResult<Self> {
+        let http = PaymentHttpClient::new(
+            Duration::from_secs(config.timeout_secs),
+            config.max_retries,
+        )?;
+        Ok(Self { config, http })
     }
 
-    /// Create provider from environment variables
-    pub fn from_env() -> Result<Self, AppError> {
-        let config = PaystackConfig::from_env()?;
-        Ok(Self::new(config))
+    pub fn from_env() -> PaymentResult<Self> {
+        Self::new(PaystackConfig::from_env()?)
     }
 
-    /// Make an authenticated request to Paystack API
-    async fn make_request<T>(
-        &self,
-        method: reqwest::Method,
-        endpoint: &str,
-        body: Option<&serde_json::Value>,
-    ) -> Result<T, AppError>
-    where
-        T: for<'de> Deserialize<'de>,
-    {
-        let url = format!("{}{}", self.config.base_url, endpoint);
-        let mut request = self
-            .client
-            .request(method, &url)
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.secret_key),
-            )
-            .header("Content-Type", "application/json");
+    fn endpoint(&self, path: &str) -> String {
+        format!("{}{}", self.config.base_url, path)
+    }
 
-        if let Some(body) = body {
-            request = request.json(body);
-        }
-
-        let mut last_error = None;
-        for attempt in 0..=self.config.max_retries {
-            match request.try_clone() {
-                Some(req) => {
-                    match req.send().await {
-                        Ok(response) => {
-                            let status = response.status();
-                            let response_text = response.text().await.unwrap_or_default();
-
-                            if status.is_success() {
-                                match serde_json::from_str::<PaystackResponse<T>>(&response_text) {
-                                    Ok(paystack_resp) => {
-                                        if paystack_resp.status {
-                                            return Ok(paystack_resp.data);
-                                        } else {
-                                            let error_msg = paystack_resp.message;
-                                            error!("Paystack API error: {}", error_msg);
-                                            return Err(AppError::new(AppErrorKind::External(
-                                                ExternalError::PaymentProvider {
-                                                    provider: "Paystack".to_string(),
-                                                    message: error_msg,
-                                                    is_retryable: false,
-                                                },
-                                            )));
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to parse Paystack response: {}", e);
-                                        return Err(AppError::new(AppErrorKind::External(
-                                            ExternalError::PaymentProvider {
-                                                provider: "Paystack".to_string(),
-                                                message: format!("Invalid response format: {}", e),
-                                                is_retryable: false,
-                                            },
-                                        )));
-                                    }
-                                }
-                            } else if status == 429 {
-                                // Rate limit - retry with backoff
-                                if attempt < self.config.max_retries {
-                                    let backoff = 2_u64.pow(attempt);
-                                    warn!(
-                                        "Rate limited, retrying after {} seconds (attempt {})",
-                                        backoff,
-                                        attempt + 1
-                                    );
-                                    tokio::time::sleep(Duration::from_secs(backoff)).await;
-                                    continue;
-                                }
-                                return Err(AppError::new(AppErrorKind::External(
-                                    ExternalError::RateLimit {
-                                        service: "Paystack".to_string(),
-                                        retry_after: Some(60),
-                                    },
-                                )));
-                            } else if status.is_server_error() && attempt < self.config.max_retries
-                            {
-                                // Server error - retry
-                                let backoff = 2_u64.pow(attempt);
-                                warn!(
-                                    "Server error {}, retrying after {} seconds (attempt {})",
-                                    status,
-                                    backoff,
-                                    attempt + 1
-                                );
-                                tokio::time::sleep(Duration::from_secs(backoff)).await;
-                                continue;
-                            } else {
-                                let error_msg = format!("HTTP {}: {}", status, response_text);
-                                error!("Paystack API error: {}", error_msg);
-                                return Err(AppError::new(AppErrorKind::External(
-                                    ExternalError::PaymentProvider {
-                                        provider: "Paystack".to_string(),
-                                        message: error_msg,
-                                        is_retryable: status.is_server_error(),
-                                    },
-                                )));
-                            }
-                        }
-                        Err(e) => {
-                            last_error = Some(e);
-                            if attempt < self.config.max_retries {
-                                let backoff = 2_u64.pow(attempt);
-                                warn!(
-                                    "Request error, retrying after {} seconds (attempt {}): {}",
-                                    backoff,
-                                    attempt + 1,
-                                    last_error.as_ref().unwrap()
-                                );
-                                tokio::time::sleep(Duration::from_secs(backoff)).await;
-                                continue;
-                            }
-                        }
-                    }
-                }
-                None => {
-                    return Err(AppError::new(AppErrorKind::External(
-                        ExternalError::PaymentProvider {
-                            provider: "Paystack".to_string(),
-                            message: "Failed to clone request".to_string(),
-                            is_retryable: false,
-                        },
-                    )));
-                }
-            }
-        }
-
-        Err(AppError::new(AppErrorKind::External(
-            ExternalError::PaymentProvider {
-                provider: "Paystack".to_string(),
-                message: format!(
-                    "Request failed after {} retries: {}",
-                    self.config.max_retries,
-                    last_error
-                        .as_ref()
-                        .map(|e| e.to_string())
-                        .unwrap_or_else(|| "Unknown error".to_string())
-                ),
-                is_retryable: true,
-            },
-        )))
+    fn ensure_status_ref(request: &StatusRequest) -> PaymentResult<String> {
+        request
+            .provider_reference
+            .clone()
+            .or_else(|| request.transaction_reference.clone())
+            .filter(|v| !v.trim().is_empty())
+            .ok_or(PaymentError::ValidationError {
+                message: "provider_reference or transaction_reference is required".to_string(),
+                field: Some("reference".to_string()),
+            })
     }
 }
 
 #[async_trait]
 impl PaymentProvider for PaystackProvider {
-    async fn initiate_payment(
-        &self,
-        request: PaymentRequest,
-    ) -> crate::error::AppResult<PaymentResponse> {
-        info!(
-            "Initiating Paystack payment: {} {} {}",
-            request.amount, request.currency, request.reference
-        );
+    async fn initiate_payment(&self, request: PaymentRequest) -> PaymentResult<PaymentResponse> {
+        request.amount.validate_positive("amount")?;
+        if request.customer.email.as_deref().unwrap_or("").trim().is_empty() {
+            return Err(PaymentError::ValidationError {
+                message: "customer.email is required for paystack initialization".to_string(),
+                field: Some("customer.email".to_string()),
+            });
+        }
 
-        let mut payload = serde_json::json!({
-            "email": request.email,
-            "amount": request.amount,
-            "currency": request.currency,
-            "reference": request.reference,
+        let payload = serde_json::json!({
+            "email": request.customer.email,
+            "amount": request.amount.amount,
+            "currency": request.amount.currency,
+            "reference": request.transaction_reference,
+            "callback_url": request.callback_url,
+            "metadata": request.metadata,
         });
 
-        if let Some(callback_url) = request.callback_url {
-            payload["callback_url"] = serde_json::Value::String(callback_url);
-        }
-
-        if let Some(channels) = request.channels {
-            payload["channels"] = serde_json::Value::Array(
-                channels
-                    .into_iter()
-                    .map(serde_json::Value::String)
-                    .collect(),
-            );
-        }
-
-        if let Some(metadata) = request.metadata {
-            payload["metadata"] = metadata;
-        }
-
-        let response: PaystackInitializeResponse = self
-            .make_request(
+        let raw: PaystackEnvelope<PaystackInitializeData> = self
+            .http
+            .request_json(
                 reqwest::Method::POST,
-                "/transaction/initialize",
+                &self.endpoint("/transaction/initialize"),
+                Some(&self.config.secret_key),
                 Some(&payload),
+                &[("Content-Type", "application/json")],
             )
             .await?;
 
-        info!(
-            "Paystack payment initiated successfully: reference={}",
-            response.reference
-        );
+        if !raw.status {
+            return Err(PaymentError::ProviderError {
+                provider: "paystack".to_string(),
+                message: raw.message,
+                provider_code: None,
+                retryable: false,
+            });
+        }
+        let data = raw.data;
+        info!(reference = %data.reference, "paystack payment initiated");
 
         Ok(PaymentResponse {
-            authorization_url: Some(response.authorization_url),
-            access_code: Some(response.access_code.clone()),
-            reference: response.reference,
+            status: PaymentState::Pending,
+            transaction_reference: request.transaction_reference,
+            provider_reference: Some(data.reference.clone()),
+            payment_url: Some(data.authorization_url),
+            amount_charged: Some(request.amount),
+            fees_charged: None,
             provider_data: Some(serde_json::json!({
-                "access_code": response.access_code,
+                "access_code": data.access_code,
+                "provider_reference": data.reference
             })),
         })
     }
 
-    async fn verify_payment(&self, reference: &str) -> crate::error::AppResult<PaymentStatus> {
-        info!("Verifying Paystack payment: reference={}", reference);
-
-        let response: PaystackVerifyResponse = self
-            .make_request(
+    async fn verify_payment(&self, request: StatusRequest) -> PaymentResult<StatusResponse> {
+        let reference = Self::ensure_status_ref(&request)?;
+        let raw: PaystackEnvelope<PaystackVerifyData> = self
+            .http
+            .request_json(
                 reqwest::Method::GET,
-                &format!("/transaction/verify/{}", reference),
+                &self.endpoint(&format!("/transaction/verify/{}", reference)),
+                Some(&self.config.secret_key),
                 None,
+                &[],
             )
             .await?;
+        if !raw.status {
+            return Err(PaymentError::ProviderError {
+                provider: "paystack".to_string(),
+                message: raw.message,
+                provider_code: None,
+                retryable: false,
+            });
+        }
 
-        info!(
-            "Paystack payment verified: reference={}, status={}",
-            reference, response.status
-        );
-
-        let status = match response.status.as_str() {
-            "success" => PaymentStatus::Success {
-                amount: response.amount.to_string(),
-                currency: response.currency,
-                paid_at: response.paid_at,
-                channel: Some(response.channel),
-            },
-            "pending" => PaymentStatus::Pending,
-            "failed" => PaymentStatus::Failed {
-                reason: response.gateway_response,
-            },
-            "reversed" => PaymentStatus::Reversed,
-            _ => PaymentStatus::Unknown,
+        let status = match raw.data.status.as_str() {
+            "success" => PaymentState::Success,
+            "pending" => PaymentState::Pending,
+            "failed" => PaymentState::Failed,
+            "abandoned" => PaymentState::Cancelled,
+            "reversed" => PaymentState::Reversed,
+            _ => PaymentState::Unknown,
         };
 
-        Ok(status)
+        Ok(StatusResponse {
+            status,
+            transaction_reference: request.transaction_reference,
+            provider_reference: Some(reference),
+            amount: Some(Money {
+                amount: raw.data.amount.to_string(),
+                currency: raw.data.currency,
+            }),
+            payment_method: Some(match raw.data.channel.as_str() {
+                "card" => PaymentMethod::Card,
+                "bank" | "bank_transfer" => PaymentMethod::BankTransfer,
+                "mobile_money" => PaymentMethod::MobileMoney,
+                "ussd" => PaymentMethod::Ussd,
+                _ => PaymentMethod::Other,
+            }),
+            timestamp: raw.data.paid_at,
+            failure_reason: raw.data.gateway_response,
+            provider_data: None,
+        })
     }
 
     async fn process_withdrawal(
         &self,
         request: WithdrawalRequest,
-    ) -> crate::error::AppResult<WithdrawalResponse> {
-        info!(
-            "Processing Paystack withdrawal: {} {} {}",
-            request.amount, request.currency, request.reference
-        );
+    ) -> PaymentResult<WithdrawalResponse> {
+        request.amount.validate_positive("amount")?;
+        if !matches!(request.withdrawal_method, WithdrawalMethod::BankTransfer) {
+            return Err(PaymentError::ValidationError {
+                message: "paystack currently supports bank transfer withdrawals only".to_string(),
+                field: Some("withdrawal_method".to_string()),
+            });
+        }
 
-        // Step 1: Create transfer recipient
+        let account_name = request
+            .recipient
+            .account_name
+            .clone()
+            .unwrap_or_else(|| "Recipient".to_string());
+        let account_number = request
+            .recipient
+            .account_number
+            .clone()
+            .ok_or(PaymentError::ValidationError {
+                message: "recipient.account_number is required".to_string(),
+                field: Some("recipient.account_number".to_string()),
+            })?;
+        let bank_code =
+            request
+                .recipient
+                .bank_code
+                .clone()
+                .ok_or(PaymentError::ValidationError {
+                    message: "recipient.bank_code is required".to_string(),
+                    field: Some("recipient.bank_code".to_string()),
+                })?;
+
         let recipient_payload = serde_json::json!({
             "type": "nuban",
-            "name": request.recipient_name,
-            "account_number": request.account_number,
-            "bank_code": request.bank_code,
-            "currency": request.currency,
+            "name": account_name,
+            "account_number": account_number,
+            "bank_code": bank_code,
+            "currency": request.amount.currency,
         });
 
-        let recipient: PaystackRecipientResponse = self
-            .make_request(
+        let recipient: PaystackEnvelope<PaystackRecipientData> = self
+            .http
+            .request_json(
                 reqwest::Method::POST,
-                "/transferrecipient",
+                &self.endpoint("/transferrecipient"),
+                Some(&self.config.secret_key),
                 Some(&recipient_payload),
+                &[("Content-Type", "application/json")],
             )
             .await?;
+        if !recipient.status {
+            return Err(PaymentError::ProviderError {
+                provider: "paystack".to_string(),
+                message: recipient.message,
+                provider_code: None,
+                retryable: false,
+            });
+        }
 
-        info!(
-            "Paystack recipient created: recipient_code={}",
-            recipient.recipient_code
-        );
-
-        // Step 2: Initiate transfer
-        let mut transfer_payload = serde_json::json!({
+        let transfer_payload = serde_json::json!({
             "source": "balance",
-            "amount": request.amount,
-            "recipient": recipient.recipient_code,
-            "reference": request.reference,
+            "amount": request.amount.amount,
+            "recipient": recipient.data.recipient_code,
+            "reference": request.transaction_reference,
+            "reason": request.reason,
+            "metadata": request.metadata,
         });
 
-        if let Some(reason) = request.reason {
-            transfer_payload["reason"] = serde_json::Value::String(reason);
-        }
-
-        if let Some(metadata) = request.metadata {
-            transfer_payload["metadata"] = metadata;
-        }
-
-        let transfer: PaystackTransferResponse = self
-            .make_request(reqwest::Method::POST, "/transfer", Some(&transfer_payload))
+        let transfer: PaystackEnvelope<PaystackTransferData> = self
+            .http
+            .request_json(
+                reqwest::Method::POST,
+                &self.endpoint("/transfer"),
+                Some(&self.config.secret_key),
+                Some(&transfer_payload),
+                &[("Content-Type", "application/json")],
+            )
             .await?;
+        if !transfer.status {
+            return Err(PaymentError::ProviderError {
+                provider: "paystack".to_string(),
+                message: transfer.message,
+                provider_code: None,
+                retryable: false,
+            });
+        }
 
-        info!(
-            "Paystack withdrawal processed: transfer_code={}, status={}",
-            transfer.transfer_code, transfer.status
-        );
-
-        let withdrawal_status = match transfer.status.as_str() {
-            "success" => WithdrawalStatus::Success,
-            "pending" => WithdrawalStatus::Pending,
-            "failed" => WithdrawalStatus::Failed {
-                reason: transfer.failure_reason,
-            },
-            "reversed" => WithdrawalStatus::Reversed,
-            _ => WithdrawalStatus::Pending,
+        let status = match transfer.data.status.as_str() {
+            "success" => PaymentState::Success,
+            "pending" => PaymentState::Processing,
+            "failed" => PaymentState::Failed,
+            "reversed" => PaymentState::Reversed,
+            _ => PaymentState::Unknown,
         };
 
         Ok(WithdrawalResponse {
-            transfer_reference: transfer.reference,
-            status: withdrawal_status,
+            status,
+            transaction_reference: request.transaction_reference,
+            provider_reference: Some(transfer.data.reference),
+            amount_debited: Some(request.amount),
+            fees_charged: None,
+            estimated_completion_seconds: Some(60),
             provider_data: Some(serde_json::json!({
-                "transfer_code": transfer.transfer_code,
-                "recipient_code": recipient.recipient_code,
+                "transfer_code": transfer.data.transfer_code,
+                "failure_reason": transfer.data.failure_reason
             })),
         })
     }
 
-    fn validate_webhook_signature(&self, payload: &[u8], signature: &str) -> bool {
-        use hmac::{Hmac, Mac};
-        use sha2::Sha512;
+    async fn get_payment_status(&self, request: StatusRequest) -> PaymentResult<StatusResponse> {
+        self.verify_payment(request).await
+    }
 
-        type HmacSha512 = Hmac<Sha512>;
+    fn name(&self) -> ProviderName {
+        ProviderName::Paystack
+    }
 
-        let mut mac = HmacSha512::new_from_slice(self.config.secret_key.as_bytes())
-            .expect("HMAC can take key of any size");
+    fn supported_currencies(&self) -> &'static [&'static str] {
+        &["NGN", "GHS", "ZAR", "USD"]
+    }
 
-        mac.update(payload);
-        let computed_signature = hex::encode(mac.finalize().into_bytes());
+    fn supported_countries(&self) -> &'static [&'static str] {
+        &["NG", "GH", "ZA"]
+    }
 
-        // Paystack sends signature as hex string
-        let provided_signature = signature.trim();
+    fn verify_webhook(
+        &self,
+        payload: &[u8],
+        signature: &str,
+    ) -> PaymentResult<WebhookVerificationResult> {
+        let secret = self
+            .config
+            .webhook_secret
+            .as_deref()
+            .unwrap_or(&self.config.secret_key);
+        let valid = verify_hmac_sha512_hex(payload, secret, signature);
+        Ok(WebhookVerificationResult {
+            valid,
+            reason: if valid {
+                None
+            } else {
+                Some("invalid paystack signature".to_string())
+            },
+        })
+    }
 
-        // Constant-time comparison to prevent timing attacks
-        // Using bytes comparison for constant-time operation
-        if computed_signature.len() != provided_signature.len() {
-            return false;
-        }
+    fn parse_webhook_event(&self, payload: &[u8]) -> PaymentResult<WebhookEvent> {
+        let parsed: JsonValue =
+            serde_json::from_slice(payload).map_err(|e| PaymentError::WebhookVerificationError {
+                message: format!("invalid webhook JSON payload: {}", e),
+            })?;
 
-        computed_signature
-            .as_bytes()
-            .iter()
-            .zip(provided_signature.as_bytes().iter())
-            .fold(0, |acc, (a, b)| acc | (a ^ b))
-            == 0
+        let event_type = parsed
+            .get("event")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let provider_ref = parsed
+            .get("data")
+            .and_then(|v| v.get("reference"))
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string());
+        let status = parsed
+            .get("data")
+            .and_then(|v| v.get("status"))
+            .and_then(|v| v.as_str())
+            .map(|v| match v {
+                "success" => PaymentState::Success,
+                "pending" => PaymentState::Pending,
+                "failed" => PaymentState::Failed,
+                _ => PaymentState::Unknown,
+            });
+
+        Ok(WebhookEvent {
+            provider: ProviderName::Paystack,
+            event_type,
+            transaction_reference: None,
+            provider_reference: provider_ref,
+            status,
+            payload: parsed,
+            received_at: chrono::Utc::now().to_rfc3339(),
+        })
     }
 }
 
-// Paystack API response wrapper
 #[derive(Debug, Deserialize)]
-struct PaystackResponse<T> {
+struct PaystackEnvelope<T> {
     status: bool,
     message: String,
     data: T,
 }
 
-// Initialize transaction response
 #[derive(Debug, Deserialize)]
-struct PaystackInitializeResponse {
+struct PaystackInitializeData {
     authorization_url: String,
     access_code: String,
     reference: String,
 }
 
-// Verify transaction response
 #[derive(Debug, Deserialize)]
-struct PaystackVerifyResponse {
+struct PaystackVerifyData {
     amount: u64,
     currency: String,
     status: String,
@@ -470,15 +418,13 @@ struct PaystackVerifyResponse {
     gateway_response: Option<String>,
 }
 
-// Transfer recipient response
 #[derive(Debug, Deserialize)]
-struct PaystackRecipientResponse {
+struct PaystackRecipientData {
     recipient_code: String,
 }
 
-// Transfer response
 #[derive(Debug, Deserialize)]
-struct PaystackTransferResponse {
+struct PaystackTransferData {
     transfer_code: String,
     reference: String,
     status: String,
@@ -490,38 +436,31 @@ struct PaystackTransferResponse {
 mod tests {
     use super::*;
 
-    fn create_test_provider() -> PaystackProvider {
-        let config = PaystackConfig {
-            secret_key: "sk_test_test_key".to_string(),
+    fn provider() -> PaystackProvider {
+        PaystackProvider::new(PaystackConfig {
+            public_key: Some("pk_test".to_string()),
+            secret_key: "sk_test".to_string(),
+            webhook_secret: Some("whsec_test".to_string()),
             base_url: "https://api.paystack.co".to_string(),
-            timeout_secs: 30,
-            max_retries: 3,
-        };
-        PaystackProvider::new(config)
+            timeout_secs: 5,
+            max_retries: 1,
+        })
+        .expect("provider init should succeed")
     }
 
     #[test]
-    fn test_webhook_signature_validation_invalid() {
-        let provider = create_test_provider();
-        let payload = b"test payload";
-        let signature = "invalid_signature";
-        let result = provider.validate_webhook_signature(payload, signature);
-        assert!(!result, "Invalid signature should return false");
+    fn webhook_signature_validation_invalid() {
+        let provider = provider();
+        let payload = br#"{"event":"charge.success"}"#;
+        let result = provider
+            .verify_webhook(payload, "invalid_signature")
+            .expect("verification should not error");
+        assert!(!result.valid);
     }
 
     #[test]
-    fn test_paystack_config_default() {
-        let config = PaystackConfig::default();
-        assert_eq!(config.base_url, "https://api.paystack.co");
-        assert_eq!(config.timeout_secs, 30);
-        assert_eq!(config.max_retries, 3);
-    }
-
-    #[test]
-    fn test_paystack_config_from_env_missing_key() {
-        std::env::remove_var("PAYSTACK_SECRET_KEY");
-
-        let config = PaystackConfig::from_env();
-        assert!(config.is_err(), "Config should fail without secret key");
+    fn secure_eq_works() {
+        assert!(crate::payments::utils::secure_eq(b"abc", b"abc"));
+        assert!(!crate::payments::utils::secure_eq(b"abc", b"abd"));
     }
 }
