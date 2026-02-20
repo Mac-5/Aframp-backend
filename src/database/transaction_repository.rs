@@ -235,23 +235,27 @@ impl TransactionRepository {
 
     /// Find pending payments for monitoring
     ///
-    /// Returns transactions that are in 'pending' or 'processing' status
-    /// and were created within the specified time window (in hours).
+    /// Returns up to `limit` transactions that are in 'pending' or 'processing' status
+    /// and were created within `window_hours` hours. Ordered oldest-first so stale
+    /// transactions are resolved before newer ones.
     pub async fn find_pending_payments_for_monitoring(
         &self,
-        hours_back: i32,
+        window_hours: i32,
+        limit: i64,
     ) -> Result<Vec<Transaction>, DatabaseError> {
         sqlx::query_as::<_, Transaction>(
-            "SELECT transaction_id, wallet_address, type, from_currency, to_currency, 
-                    from_amount, to_amount, cngn_amount, status, payment_provider, 
-                    payment_reference, blockchain_tx_hash, error_message, metadata, 
-                    created_at, updated_at 
-             FROM transactions 
-             WHERE status IN ('pending', 'processing') 
+            "SELECT transaction_id, wallet_address, type, from_currency, to_currency,
+                    from_amount, to_amount, cngn_amount, status, payment_provider,
+                    payment_reference, blockchain_tx_hash, error_message, metadata,
+                    created_at, updated_at
+             FROM transactions
+             WHERE status IN ('pending', 'processing')
                AND created_at > NOW() - INTERVAL '1 hour' * $1
-             ORDER BY created_at ASC",
+             ORDER BY created_at ASC
+             LIMIT $2",
         )
-        .bind(hours_back)
+        .bind(window_hours)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
         .map_err(DatabaseError::from_sqlx)
