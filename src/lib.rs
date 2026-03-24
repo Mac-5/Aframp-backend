@@ -47,6 +47,10 @@ pub mod config;
 #[cfg(feature = "database")]
 pub mod api;
 
+// Auth module – JWT generation, validation, middleware
+#[cfg(feature = "database")]
+pub mod auth;
+
 // Health check module
 #[cfg(feature = "database")]
 pub mod health;
@@ -54,6 +58,10 @@ pub mod health;
 // Background workers
 #[cfg(feature = "database")]
 pub mod workers;
+
+// Prometheus metrics
+#[cfg(feature = "database")]
+pub mod metrics;
 
 // Contract error enum for Soroban (only when not using database feature)
 #[cfg(not(feature = "database"))]
