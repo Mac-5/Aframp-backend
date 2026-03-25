@@ -19,8 +19,7 @@ crate-type = ["cdylib", "rlib"]
 # ---------------------------------------------------------------------------
 [features]
 default = ["database", "cache"]
-database = [ "dep:tokio", "dep:async-trait", "dep:uuid", "dep:chrono", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:axum", "dep:tower", "dep:tower-http", "dep:regex", "dep:http", "dep:sqlx", "dep:hmac", "dep:sha2", "dep:hex", "dep:bigdecimal", "dep:rust_decimal", "dep:stellar-strkey", "dep:ed25519-dalek", "dep:stellar-xdr", "dep:jsonwebtoken" ]
-database = [ "dep:tokio", "dep:async-trait", "dep:uuid", "dep:chrono", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:axum", "dep:tower", "dep:tower-http", "dep:regex", "dep:http", "dep:sqlx", "dep:hmac", "dep:sha2", "dep:hex", "dep:bigdecimal", "dep:rust_decimal", "dep:stellar-strkey", "dep:ed25519-dalek", "dep:stellar-xdr", "dep:utoipa", "dep:utoipa-swagger-ui" ]
+database = [ "dep:tokio", "dep:async-trait", "dep:uuid", "dep:chrono", "dep:serde", "dep:serde_json", "dep:tracing", "dep:tracing-subscriber", "dep:axum", "dep:tower", "dep:tower-http", "dep:regex", "dep:http", "dep:sqlx", "dep:hmac", "dep:sha2", "dep:hex", "dep:bigdecimal", "dep:rust_decimal", "dep:stellar-strkey", "dep:ed25519-dalek", "dep:stellar-xdr", "dep:jsonwebtoken", "dep:rsa", "dep:utoipa", "dep:utoipa-swagger-ui" ]
 cache = ["dep:redis", "dep:bb8", "dep:bb8-redis", "database"]
 
 # Distributed tracing via OpenTelemetry (Issue #104).
@@ -129,11 +128,12 @@ tracing-subscriber = { version = "0.3",  features = ["json", "env-filter", "fmt"
 # JWT authentication
 jsonwebtoken = { version = "9.3", optional = true }
 
+# RSA signing for OAuth 2.0 RS256 tokens
+rsa = { version = "0.9", features = ["sha2", "pem"], optional = true }
+
 # ---------------------------------------------------------------------------
 # OpenTelemetry — distributed tracing (Issue #104, gated by "telemetry" feature)
 # ---------------------------------------------------------------------------
-
-# Core API — defines Tracer, Span, Context, and the global provider interface.
 opentelemetry = { version = "0.22", features = ["trace"], optional = true }
 
 # SDK — TracerProvider, BatchSpanProcessor, samplers, ID generators.
