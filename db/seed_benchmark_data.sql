@@ -40,6 +40,20 @@ ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- 2. Seed wallets (1 wallet per user, Stellar chain)
+--    Includes realistic afri_balance and balance values for balance-check
+--    query profiling.
+-- ---------------------------------------------------------------------------
+INSERT INTO wallets (id, user_id, wallet_address, chain, has_afri_trustline,
+                     afri_balance, balance, last_balance_check, created_at, updated_at)
+SELECT
+    gen_random_uuid(),
+    u.id,
+    'G' || upper(md5(u.id::text || 'wallet')),
+    'stellar',
+    true,
+    (random() * 50000)::numeric(36,18),
+    ((random() * 50000)::numeric(36,18))::text,
+    now() - (random() * INTERVAL '1 hour'),
 -- ---------------------------------------------------------------------------
 INSERT INTO wallets (id, user_id, wallet_address, chain, has_afri_trustline,
                      afri_balance, balance, created_at, updated_at)
@@ -58,6 +72,13 @@ WHERE u.email LIKE 'bench_user_%'
 ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------------
+-- 3. Seed 1 000 000 transactions in batches of 10 000
+--    Distribution:
+--      types:     onramp (50%), offramp (35%), bill_payment (15%)
+--      statuses:  completed (70%), failed (10%), pending (10%),
+--                 processing (8%), payment_received (2%)
+--      providers: paystack (40%), flutterwave (35%), mpesa (25%)
+--      date range: last 365 days
 -- 3. Seed 1 000 000 transactions
 --    Distributed across:
 --      - types:     onramp (50%), offramp (35%), bill_payment (15%)
@@ -89,6 +110,7 @@ BEGIN
             from_currency, to_currency,
             from_amount, to_amount, cngn_amount,
             status, payment_provider, payment_reference,
+            blockchain_tx_hash, stellar_tx_hash, metadata,
             blockchain_tx_hash, metadata,
             created_at, updated_at
         )
@@ -106,6 +128,9 @@ BEGIN
             'REF-' || upper(md5(random()::text)),
             CASE WHEN random() > 0.3
                  THEN 'HASH-' || upper(md5(random()::text))
+                 ELSE NULL END,
+            CASE WHEN random() > 0.5
+                 THEN upper(md5(random()::text))
                  ELSE NULL END,
             '{"source":"benchmark"}'::jsonb,
             now() - (random() * INTERVAL '365 days'),
@@ -125,11 +150,30 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- 4. Seed exchange rate history (for rate lookup profiling)
+-- ---------------------------------------------------------------------------
+INSERT INTO exchange_rates (id, from_currency, to_currency, rate, source, created_at, updated_at)
+SELECT
+    gen_random_uuid()::text,
+    fc,
+    'cNGN',
+    ((random() * 1000) + 100)::text,
+    'benchmark',
+    now() - (n * INTERVAL '1 hour'),
+    now() - (n * INTERVAL '1 hour')
+FROM
+    unnest(ARRAY['NGN','KES','GHS','ZAR','UGX']) AS fc,
+    generate_series(0, 719) AS n   -- 30 days of hourly rates per pair
+ON CONFLICT (from_currency, to_currency) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- 5. Update statistics so the planner uses the new data immediately
 -- 4. Update statistics so the planner uses the new data immediately
 -- ---------------------------------------------------------------------------
 ANALYZE transactions;
 ANALYZE wallets;
 ANALYZE users;
+ANALYZE exchange_rates;
 
 \echo 'Benchmark seed complete.'
 \echo 'Run EXPLAIN ANALYZE queries from DATABASE_OPTIMIZATIONS.md to profile.'
