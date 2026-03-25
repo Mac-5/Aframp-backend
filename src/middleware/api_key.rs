@@ -23,6 +23,9 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::cache::RedisCache;
+use crate::services::revocation::RevocationService;
+
 // ─── Error Responses ─────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -83,10 +86,52 @@ pub struct AuthenticatedKey {
 }
 
 /// Look up a raw API key in the database and return its granted scopes.
-/// Returns `None` if the key does not exist or is inactive/expired.
+/// Returns `None` if the key does not exist, is inactive/expired, or is blacklisted.
+///
+/// Blacklist check order (short-circuit on first hit):
+///   1. Redis consumer blacklist set  (O(1))
+///   2. Redis revoked key set         (O(1))
+///   3. Database hash verification    (DB query)
 pub async fn resolve_api_key(pool: &PgPool, raw_key: &str) -> Option<AuthenticatedKey> {
+    resolve_api_key_with_redis(pool, None, raw_key).await
+}
+
+/// Variant that accepts an optional Redis handle for blacklist pre-checks.
+pub async fn resolve_api_key_with_redis(
+    pool: &PgPool,
+    redis: Option<&RedisCache>,
+    raw_key: &str,
+) -> Option<AuthenticatedKey> {
     let hash = hash_key(raw_key);
 
+    // ── Step 1 & 2: Redis blacklist checks (before any DB query) ─────────────
+    if let Some(redis) = redis {
+        if let Ok(Some(key_id_row)) = sqlx::query!(
+            r#"SELECT id, consumer_id FROM api_keys WHERE key_hash = $1 LIMIT 1"#,
+            hash
+        )
+        .fetch_optional(pool)
+        .await
+        {
+            if RevocationService::is_consumer_blacklisted_redis(redis, key_id_row.consumer_id).await {
+                warn!(
+                    key_id = %key_id_row.id,
+                    consumer_id = %key_id_row.consumer_id,
+                    "Request rejected: consumer is blacklisted (Redis)"
+                );
+                return None;
+            }
+            if RevocationService::is_key_blacklisted_redis(redis, key_id_row.id).await {
+                warn!(
+                    key_id = %key_id_row.id,
+                    "Request rejected: key is revoked (Redis blacklist)"
+                );
+                return None;
+            }
+        }
+    }
+
+    // ── Step 3: Full DB hash verification ────────────────────────────────────
     let row = sqlx::query!(
         r#"
         SELECT
@@ -140,11 +185,12 @@ fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
 
 /// Axum middleware that:
 /// 1. Extracts the bearer token from the request.
-/// 2. Resolves it against the database.
-/// 3. Checks that `required_scope` is in the granted scope list.
-/// 4. Injects `AuthenticatedKey` into request extensions on success.
+/// 2. Checks Redis blacklist (consumer + key) before DB verification.
+/// 3. Resolves it against the database.
+/// 4. Checks that `required_scope` is in the granted scope list.
+/// 5. Injects `AuthenticatedKey` into request extensions on success.
 ///
-/// Returns 401 for missing/invalid keys, 403 for valid keys without the required scope.
+/// Returns 401 for missing/invalid/revoked keys, 403 for valid keys without the required scope.
 pub async fn scope_guard(
     State((pool, required_scope)): State<(Arc<PgPool>, &'static str)>,
     mut req: Request<Body>,

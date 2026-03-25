@@ -1082,16 +1082,64 @@ async fn main() -> anyhow::Result<()> {
     // ── Admin scope management routes (Issue #132) ───────────────────────────
     let admin_routes = if let Some(pool) = db_pool.clone() {
         let scopes_state = api::admin::scopes::ScopesState {
-            db: std::sync::Arc::new(pool),
+            db: std::sync::Arc::new(pool.clone()),
         };
-        Router::new()
+
+        // ── Revocation & Blacklist routes (Issue #138) ────────────────────────
+        let revocation_state = if let Some(ref redis) = redis_cache {
+            let svc = std::sync::Arc::new(services::revocation::RevocationService::new(
+                std::sync::Arc::new(pool.clone()),
+                std::sync::Arc::new(redis.clone()),
+                notification_service.clone(),
+            ));
+            let svc_clone = svc.clone();
+            tokio::spawn(async move {
+                if let Err(e) = svc_clone.bootstrap_redis_blacklist().await {
+                    tracing::error!(error = %e, "Redis blacklist bootstrap failed");
+                }
+            });
+            Some(api::admin::revocation::RevocationState { service: svc })
+        } else {
+            info!("Skipping revocation service (no Redis)");
+            None
+        };
+
+        let mut router = Router::new()
             .route("/api/admin/scopes", get(api::admin::scopes::list_scopes))
             .route(
                 "/api/admin/consumers/{consumer_id}/keys/{key_id}/scopes",
                 get(api::admin::scopes::get_key_scopes)
                     .patch(api::admin::scopes::update_key_scopes),
             )
-            .with_state(scopes_state)
+            .with_state(scopes_state);
+
+        if let Some(rev_state) = revocation_state {
+            router = router.merge(
+                Router::new()
+                    .route(
+                        "/api/developer/keys/{key_id}/revoke",
+                        post(api::admin::revocation::consumer_revoke_key),
+                    )
+                    .route(
+                        "/api/admin/consumers/{consumer_id}/keys/{key_id}/revoke",
+                        post(api::admin::revocation::admin_revoke_key),
+                    )
+                    .route(
+                        "/api/admin/consumers/{consumer_id}/revoke-all",
+                        post(api::admin::revocation::admin_revoke_all_consumer_keys),
+                    )
+                    .route(
+                        "/api/admin/consumers/{consumer_id}/blacklist",
+                        post(api::admin::revocation::admin_blacklist_consumer)
+                            .delete(api::admin::revocation::admin_lift_consumer_blacklist),
+                    )
+                    .route("/api/admin/revocations", get(api::admin::revocation::list_revocations))
+                    .route("/api/admin/blacklist", get(api::admin::revocation::list_blacklist))
+                    .with_state(rev_state),
+            );
+        }
+
+        router
     } else {
         info!("Skipping admin routes (no database)");
         Router::new()
