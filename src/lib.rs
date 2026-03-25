@@ -57,6 +57,10 @@ pub mod api;
 #[cfg(feature = "database")]
 pub mod auth;
 
+// OAuth 2.0 authorization server
+#[cfg(feature = "database")]
+pub mod oauth;
+
 // Health check module
 #[cfg(feature = "database")]
 pub mod health;

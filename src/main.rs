@@ -9,6 +9,7 @@ mod health;
 mod logging;
 mod metrics;
 mod middleware;
+mod oauth;
 mod payments;
 mod services;
 mod workers;
@@ -1053,22 +1054,34 @@ async fn main() -> anyhow::Result<()> {
     // ── OpenAPI / Swagger UI (Issue #114) ────────────────────────────────────
     let openapi_routes = api::openapi::openapi_routes();
 
-    // Setup transaction history routes
-    let history_routes = if let Some(pool) = db_pool.clone() {
-        let history_state = std::sync::Arc::new(api::transaction_history::TransactionHistoryState {
-            pool: std::sync::Arc::new(pool),
-            cache: redis_cache.clone().map(std::sync::Arc::new),
-        });
-        Router::new()
-            .route("/api/transactions", get(api::transaction_history::get_transaction_history))
-            .route("/api/transactions/export", get(api::transaction_history::export_transaction_history))
-            .with_state(history_state)
+    // Setup OAuth 2.0 routes
+    let oauth_routes = if let (Some(pool), Some(cache)) = (db_pool.clone(), redis_cache.clone()) {
+        match oauth::RsaKeyPair::from_env() {
+            Ok(key_pair) => {
+                let issuer = std::env::var("OAUTH_ISSUER")
+                    .unwrap_or_else(|_| "https://api.aframp.com".to_string());
+                let is_production = std::env::var("ENVIRONMENT")
+                    .unwrap_or_default()
+                    .to_lowercase() == "production";
+                let oauth_state = std::sync::Arc::new(oauth::OAuthState {
+                    db_pool: pool,
+                    redis_cache: cache,
+                    key_pair: std::sync::Arc::new(key_pair),
+                    issuer,
+                    is_production,
+                });
+                info!("🔑 OAuth 2.0 routes enabled (RS256)");
+                oauth::oauth_router(oauth_state)
+            }
+            Err(e) => {
+                tracing::warn!("⏭️  Skipping OAuth routes: {}", e);
+                Router::new()
+            }
+        }
     } else {
-        info!("⏭️  Skipping transaction history routes (no database)");
+        info!("⏭️  Skipping OAuth routes (missing database or cache)");
         Router::new()
     };
-
-
     let app = Router::new()
         .route("/", get(root))
         .route("/health", get(health))
@@ -1115,6 +1128,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(batch_routes)
         .merge(admin_routes)
         .merge(openapi_routes)
+        .merge(oauth_routes)
         .merge(history_routes)
         .with_state(AppState {
             db_pool,
