@@ -13,3 +13,4 @@ pub mod openapi;
 pub mod admin;
 pub mod batch;
 pub mod key_rotation;
+pub mod developer;
