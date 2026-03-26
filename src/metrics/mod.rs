@@ -630,6 +630,102 @@ pub mod security {
 }
 
 // ---------------------------------------------------------------------------
+// IP Detection & Blocking metrics (Issue #166)
+// ---------------------------------------------------------------------------
+
+pub mod ip_detection {
+    use super::*;
+
+    static IP_FLAGGED_TOTAL: OnceLock<CounterVec> = OnceLock::new();
+    static IP_BLOCKS_APPLIED_TOTAL: OnceLock<CounterVec> = OnceLock::new();
+    static IP_SHADOW_BLOCKS_APPLIED_TOTAL: OnceLock<CounterVec> = OnceLock::new();
+    static IP_BLOCK_ENFORCEMENT_TOTAL: OnceLock<CounterVec> = OnceLock::new();
+    static IP_AUTOMATED_BLOCKING_RATE: OnceLock<GaugeVec> = OnceLock::new();
+
+    pub fn ip_flagged_total() -> &'static CounterVec {
+        IP_FLAGGED_TOTAL.get().expect("metrics not initialised")
+    }
+
+    pub fn ip_blocks_applied_total() -> &'static CounterVec {
+        IP_BLOCKS_APPLIED_TOTAL.get().expect("metrics not initialised")
+    }
+
+    pub fn ip_shadow_blocks_applied_total() -> &'static CounterVec {
+        IP_SHADOW_BLOCKS_APPLIED_TOTAL.get().expect("metrics not initialised")
+    }
+
+    pub fn ip_block_enforcement_total() -> &'static CounterVec {
+        IP_BLOCK_ENFORCEMENT_TOTAL.get().expect("metrics not initialised")
+    }
+
+    pub fn ip_automated_blocking_rate() -> &'static GaugeVec {
+        IP_AUTOMATED_BLOCKING_RATE.get().expect("metrics not initialised")
+    }
+
+    pub(super) fn register(r: &Registry) {
+        IP_FLAGGED_TOTAL
+            .set(
+                register_counter_vec_with_registry!(
+                    "aframp_ip_flagged_total",
+                    "Total IPs flagged by detection source",
+                    &["detection_source", "evidence_type"],
+                    r
+                )
+                .unwrap(),
+            )
+            .ok();
+
+        IP_BLOCKS_APPLIED_TOTAL
+            .set(
+                register_counter_vec_with_registry!(
+                    "aframp_ip_blocks_applied_total",
+                    "Total IP blocks applied by block type",
+                    &["block_type"],
+                    r
+                )
+                .unwrap(),
+            )
+            .ok();
+
+        IP_SHADOW_BLOCKS_APPLIED_TOTAL
+            .set(
+                register_counter_vec_with_registry!(
+                    "aframp_ip_shadow_blocks_applied_total",
+                    "Total IP shadow blocks applied",
+                    &[],
+                    r
+                )
+                .unwrap(),
+            )
+            .ok();
+
+        IP_BLOCK_ENFORCEMENT_TOTAL
+            .set(
+                register_counter_vec_with_registry!(
+                    "aframp_ip_block_enforcement_total",
+                    "Total IP block enforcement events by endpoint and block type",
+                    &["endpoint", "block_type"],
+                    r
+                )
+                .unwrap(),
+            )
+            .ok();
+
+        IP_AUTOMATED_BLOCKING_RATE
+            .set(
+                register_gauge_vec_with_registry!(
+                    "aframp_ip_automated_blocking_rate",
+                    "Rate of automated IP blocking per minute in the last 5 minutes",
+                    &[],
+                    r
+                )
+                .unwrap(),
+            )
+            .ok();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Register all metrics
 // ---------------------------------------------------------------------------
 
@@ -642,6 +738,7 @@ fn register_all(r: &Registry) {
     cache::register(r);
     database::register(r);
     security::register(r);
+    ip_detection::register(r);
 }
 
 // ---------------------------------------------------------------------------
