@@ -213,6 +213,14 @@ path = "tests/pentest_integration.rs"
 required-features = ["integration"]
 
 # ---------------------------------------------------------------------------
+# Integration test — API gateway security policy enforcement
+# ---------------------------------------------------------------------------
+[[test]]
+name = "gateway_integration"
+path = "tests/gateway_integration.rs"
+required-features = ["database"]
+
+# ---------------------------------------------------------------------------
 # Dev dependencies
 # ---------------------------------------------------------------------------
 [dev-dependencies]

@@ -106,6 +106,10 @@ pub mod pentest;
 #[cfg(feature = "database")]
 pub mod masking;
 
+// API gateway security policy enforcement
+#[cfg(feature = "database")]
+pub mod gateway;
+
 // Contract error enum for Soroban (only when not using database feature)
 #[cfg(not(feature = "database"))]
 #[contracterror]
